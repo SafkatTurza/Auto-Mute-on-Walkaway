@@ -1,0 +1,10 @@
+[package]
+name = "amow-domain"
+description = "Core domain: presence & meeting state machines, events, value objects."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }

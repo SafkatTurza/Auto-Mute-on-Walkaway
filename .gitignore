@@ -1,0 +1,22 @@
+# Rust
+/target
+**/target
+
+# Node / frontend (added when the UI module lands)
+node_modules
+dist
+.vite
+
+# Tauri build output
+src-tauri/target
+src-tauri/gen
+
+# App runtime artifacts (config & logs are written to the OS data dir,
+# never committed)
+*.log
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode
+*.swp

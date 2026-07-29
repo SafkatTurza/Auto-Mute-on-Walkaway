@@ -1,0 +1,10 @@
+[package]
+name = "amow-logger"
+description = "Small leveled logger writing structured lines to a local sink."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+amow-config = { workspace = true }

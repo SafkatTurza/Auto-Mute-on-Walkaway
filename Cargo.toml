@@ -1,0 +1,37 @@
+# Workspace root for the pure-logic crates of Auto-Mute-on-Walkaway.
+#
+# These crates form the Core / Application layers of the Clean Architecture.
+# They carry NO GUI or OS dependencies, so `cargo test` builds and verifies
+# them without webkit2gtk or a windowing system. The Tauri application lives
+# in `src-tauri/` as a standalone crate that wires these into the OS.
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/config",
+    "crates/logger",
+    "crates/eventbus",
+    "crates/application",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+amow-domain = { path = "crates/domain" }
+amow-config = { path = "crates/config" }
+amow-logger = { path = "crates/logger" }
+amow-eventbus = { path = "crates/eventbus" }
+amow-application = { path = "crates/application" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

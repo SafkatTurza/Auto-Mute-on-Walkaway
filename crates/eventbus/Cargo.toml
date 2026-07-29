@@ -1,0 +1,10 @@
+[package]
+name = "amow-eventbus"
+description = "Synchronous in-process publish/subscribe bus for domain events."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+amow-domain = { workspace = true }
