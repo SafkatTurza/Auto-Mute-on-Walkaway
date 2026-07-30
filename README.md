@@ -28,7 +28,7 @@ is completed to production quality — with tests — before the next is started
 | Tray          | Infrastructure | ✅ Done      |
 | Settings UI   | UI             | ✅ Done (React) |
 | Tauri wiring  | UI / OS        | ✅ Done      |
-| Camera        | Infrastructure | ⚠️ Platform-limited (see below) |
+| Camera        | Infrastructure | ✅ Done (Linux, `uvcvideo` bind/unbind — see below) |
 | Presence capture (MediaPipe) | Infrastructure | ✅ Done (Python sidecar, see `presence-detector/`) |
 | Host bridge (sidecar → Event Bus) | Application | ⏳ Next |
 | Meeting detection | Infrastructure | ⏳ Next  |
@@ -52,12 +52,20 @@ spawning that sidecar and translating its event lines onto the in-process
 exposes two manual inputs — *"In a meeting"* and *"Away"* — that drive the
 **real** protection path (they mute your actual mic).
 
-**Camera is platform-limited by design, not stubbed.** Unlike audio, Linux has
-no portable way to force another app's camera off — the capture device is owned
-by the conferencing app. The `UnsupportedCamera` adapter therefore reports the
-capability as unavailable, and the controller (which already tolerates a failing
-device port) simply leaves the camera alone while still muting the mic. A future
-per-platform backend can replace that adapter without touching the core.
+**Camera control is real, at the OS level.** The `LinuxUvcCamera` adapter
+enables and disables the webcam by binding / unbinding it from the `uvcvideo`
+kernel driver through sysfs. An unbound device disappears from `/dev/video*`, so
+*no* application can capture from it until it is rebound — unlike audio this is a
+system-wide switch, and unlike `modprobe -r uvcvideo` it works per-device and
+even while the camera is in use (the walkaway case). The adapter remembers
+exactly which interfaces it unbound and rebinds only those on return, so it never
+disturbs devices it did not touch. Writing to the driver's bind/unbind files
+needs elevated privileges; where the app lacks them the writes fail and it
+degrades to the safe `UnsupportedCamera` behaviour — the controller logs the
+error and leaves the camera alone while still muting the mic. The bind/unbind
+logic is fully unit-tested behind an injected sysfs seam (no root or webcam
+required). macOS/Windows backends can implement the same `Camera` port later
+without touching the core.
 
 ---
 
@@ -81,7 +89,7 @@ crates/
   eventbus/      Application: synchronous in-process pub/sub
   application/   Use cases: WalkawayController + ports (device interfaces)
   adapters/      Infrastructure: OS adapters implementing the ports
-                 (SystemClock, PulseMicrophone, UnsupportedCamera)
+                 (SystemClock, PulseMicrophone, LinuxUvcCamera, UnsupportedCamera)
 src-tauri/       UI/OS: the Tauri app that composes the above and hosts the UI
 src/             UI: the React + TypeScript Settings front end
 presence-detector/  Infrastructure: Python webcam presence sidecar
@@ -165,6 +173,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 The Tauri shell additionally needs Node.js and the platform webview
 dependencies (on Linux: `webkit2gtk-4.1`, `gtk3`, `libsoup-3` — see the Tauri
 v2 prerequisites for your OS), plus `pactl` for microphone control.
+
+Camera control (`auto_camera_off`) drives the `uvcvideo` driver through sysfs,
+which needs permission to write `/sys/bus/usb/drivers/uvcvideo/{bind,unbind}` —
+typically a udev rule granting your user access, or running with the required
+privilege. Without it the app keeps working: the camera is left untouched and
+the microphone is still muted.
 
 ```bash
 npm install                 # front-end dependencies

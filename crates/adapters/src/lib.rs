@@ -14,8 +14,10 @@ mod camera;
 mod clock;
 mod command;
 mod microphone;
+mod sysfs;
 
-pub use camera::UnsupportedCamera;
+pub use camera::{LinuxUvcCamera, UnsupportedCamera};
 pub use clock::SystemClock;
 pub use command::{CommandRunner, SystemCommandRunner};
 pub use microphone::PulseMicrophone;
+pub use sysfs::{RealSysfs, Sysfs};
