@@ -21,6 +21,7 @@
 mod camera;
 mod clock;
 mod command;
+mod idle;
 mod journal;
 mod microphone;
 mod platform;
@@ -31,6 +32,9 @@ mod windows_microphone;
 pub use camera::{LinuxUvcCamera, UnsupportedCamera};
 pub use clock::SystemClock;
 pub use command::{CommandRunner, SystemCommandRunner};
+pub use idle::{
+    default_idle_time, should_signal_return, IdleTime, PlatformIdleTime, UnsupportedIdleTime,
+};
 pub use journal::{CameraJournal, FileCameraJournal, NullCameraJournal};
 pub use microphone::PulseMicrophone;
 pub use platform::{default_camera, default_microphone, PlatformCamera, PlatformMicrophone};
@@ -38,6 +42,8 @@ pub use sysfs::{RealSysfs, Sysfs};
 pub use windows_camera::{camera_control_available, CameraDevices, WindowsCamera};
 pub use windows_microphone::{EndpointVolume, WindowsMicrophone};
 
+#[cfg(target_os = "windows")]
+pub use idle::WindowsIdleTime;
 #[cfg(target_os = "windows")]
 pub use windows_camera::SetupApiCameras;
 #[cfg(target_os = "windows")]

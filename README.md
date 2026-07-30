@@ -87,6 +87,16 @@ as administrator — refusing to disable something it has no privilege to restor
 is the only way to guarantee the camera is never left dark. The microphone is
 still muted either way.
 
+**Input activity detects the return when the camera is blind.** A disabled camera
+yields no frames, so the webcam sidecar cannot see the user come back — on its
+own that would leave the devices off indefinitely. While the camera is disabled,
+an activity monitor treats recent keyboard/mouse input as presence (via the
+platform `IdleTime` port — Windows `GetLastInputInfo`, reading only *idle time*,
+never keystrokes), which drives the controller to restore the devices; the webcam
+then resumes. It only ever reports *present*, never *away*, so it can bring the
+user back but can never mute them. The policy is a pure, unit-tested function
+(`should_signal_return`), with the OS query quarantined behind the port.
+
 **A disabled camera never outlives the app.** The webcam is re-enabled on every
 exit path: returning or turning Protection off restores it immediately; quitting
 the app restores it before the process ends (the controller's `shutdown`

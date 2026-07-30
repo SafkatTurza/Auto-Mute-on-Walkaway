@@ -138,6 +138,22 @@ is enabled but the app is *not* running elevated, it leaves the camera untouched
 and flags it in the UI ("run as administrator") rather than switching off a
 device it has no privilege to restore. The microphone is still muted either way.
 
+### Returning when the camera is disabled
+
+There is a catch to disabling the camera while presence comes from the webcam: a
+disabled camera produces no frames, so the webcam **cannot see you come back**.
+To handle that, while the camera is disabled the app watches for **keyboard or
+mouse activity** as a camera-free "you're back" signal — the moment you use the
+computer, it re-enables the camera and un-mutes the mic, and webcam presence
+takes over again.
+
+This reads only *idle time* (seconds since the last input) — never what you type
+— and it only ever signals *return*, never *away*, so it can bring you back but
+can never mute you. (For automatic restore to happen, keep **Restore on return**
+on.) If you prefer to avoid this entirely, leave **Disable camera** off and use
+webcam presence with mic-mute only — then the camera stays on and sees you return
+directly.
+
 ### The camera is never left disabled
 
 Whenever the app disables your webcam, it re-enables it in every exit path:

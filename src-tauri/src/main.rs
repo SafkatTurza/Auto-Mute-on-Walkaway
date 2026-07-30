@@ -8,6 +8,7 @@
 //! logic, installs the tray, and exposes the Tauri commands. It holds no
 //! business logic itself — that all lives in the tested crates.
 
+mod activity;
 mod bridge;
 mod commands;
 mod crash;
@@ -29,6 +30,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
+use activity::ActivityMonitor;
 use bridge::PresenceBridge;
 use notifier::AppNotifier;
 use status::SharedStatus;
@@ -43,6 +45,9 @@ pub struct AppState {
     /// Kept alive for the app's lifetime; dropping it stops the webcam sidecar.
     /// Also queried for whether presence is currently automatic (sidecar live).
     pub presence_bridge: PresenceBridge,
+    /// Kept alive for the app's lifetime; dropping it stops the input-activity
+    /// monitor that detects the user's return while the camera is disabled.
+    _activity_monitor: ActivityMonitor,
 }
 
 fn main() {
@@ -155,12 +160,23 @@ fn main() {
                 logger.clone(),
             );
 
+            // --- Activity monitor: detect the user's return from keyboard/mouse
+            // activity while the camera is disabled (the webcam is then blind and
+            // cannot see them come back). Only ever reports presence, so it can
+            // restore devices but never mute the user.
+            let activity_monitor = ActivityMonitor::spawn(
+                supervisor.face_sink(),
+                shared_status.clone(),
+                logger.clone(),
+            );
+
             app.manage(AppState {
                 supervisor,
                 status: shared_status,
                 config_path,
                 config: Mutex::new(config),
                 presence_bridge,
+                _activity_monitor: activity_monitor,
             });
 
             install_tray(app)?;
