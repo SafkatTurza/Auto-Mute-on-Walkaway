@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use amow_adapters::default_camera;
+use amow_application::Notifier;
 use amow_config::AppConfig;
 use amow_domain::DomainEvent;
 use amow_eventbus::EventBus;
