@@ -16,7 +16,9 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use amow_adapters::{LinuxUvcCamera, PulseMicrophone, SystemClock, SystemCommandRunner};
+use amow_adapters::{
+    default_camera, default_microphone, PlatformCamera, PlatformMicrophone, SystemClock,
+};
 use amow_application::WalkawayController;
 use amow_config::AppConfig;
 use amow_eventbus::EventBus;
@@ -25,9 +27,10 @@ use amow_logger::Logger;
 use crate::notifier::AppNotifier;
 use crate::status::SharedStatus;
 
-/// Concrete controller type wired to the real OS adapters.
-type Controller =
-    WalkawayController<SystemClock, PulseMicrophone<SystemCommandRunner>, LinuxUvcCamera, AppNotifier>;
+/// Concrete controller type wired to the host's native OS adapters. The
+/// microphone/camera types resolve per platform (WASAPI/SetupAPI on Windows,
+/// PulseAudio/UVC on Linux) via the adapter crate's compile-time selection.
+type Controller = WalkawayController<SystemClock, PlatformMicrophone, PlatformCamera, AppNotifier>;
 
 /// Control messages sent to the supervisor thread.
 enum Msg {
@@ -122,8 +125,8 @@ fn build_controller(config: &AppConfig, bus: EventBus, notifier: AppNotifier) ->
         config.behavior,
         config.presence,
         SystemClock::new(),
-        PulseMicrophone::system(),
-        LinuxUvcCamera::new(),
+        default_microphone(),
+        default_camera(),
         notifier,
         bus,
     )

@@ -21,13 +21,13 @@ is completed to production quality — with tests — before the next is started
 | Event Bus     | Application    | ✅ Done      |
 | Presence      | Core (logic)   | ✅ Done      |
 | Orchestration | Application    | ✅ Done      |
-| Microphone    | Infrastructure | ✅ Done (PulseAudio / PipeWire via `pactl`) |
+| Microphone    | Infrastructure | ✅ Done (Windows WASAPI · Linux PulseAudio/PipeWire) |
 | Clock         | Infrastructure | ✅ Done      |
 | Notification  | Infrastructure | ✅ Done (Tauri notification plugin) |
 | Tray          | Infrastructure | ✅ Done      |
 | Settings UI   | UI             | ✅ Done (React) |
 | Tauri wiring  | UI / OS        | ✅ Done      |
-| Camera        | Infrastructure | ✅ Done (Linux, `uvcvideo` bind/unbind — see below) |
+| Camera        | Infrastructure | ✅ Done (Windows SetupAPI · Linux `uvcvideo` — see below) |
 | Presence capture (MediaPipe) | Infrastructure | ✅ Done (Python sidecar, see `presence-detector/`) |
 | Host bridge (sidecar → Event Bus) | UI / OS | ✅ Done (spawns the sidecar, feeds presence in) |
 
@@ -61,20 +61,36 @@ switch the user turns on: while it is on, a walkaway mutes the mic and disables
 the camera; turning it off (or returning) restores them. The manual toggles
 drive the **real** protection path (they mute your actual mic).
 
-**Camera control is real, at the OS level.** The `LinuxUvcCamera` adapter
-enables and disables the webcam by binding / unbinding it from the `uvcvideo`
-kernel driver through sysfs. An unbound device disappears from `/dev/video*`, so
-*no* application can capture from it until it is rebound — unlike audio this is a
-system-wide switch, and unlike `modprobe -r uvcvideo` it works per-device and
-even while the camera is in use (the walkaway case). The adapter remembers
-exactly which interfaces it unbound and rebinds only those on return, so it never
-disturbs devices it did not touch. Writing to the driver's bind/unbind files
-needs elevated privileges; where the app lacks them the writes fail and it
+**Camera control is real, at the OS level, on both platforms.** On Windows the
+`WindowsCamera` adapter disables and re-enables the webcam's device node through
+SetupAPI / Configuration Manager — the same operation as Device Manager's
+"Disable device", which removes the camera from *every* application until it is
+re-enabled. On Linux the `LinuxUvcCamera` adapter does the equivalent by binding
+/ unbinding the webcam from the `uvcvideo` kernel driver through sysfs; an
+unbound device disappears from `/dev/video*`. Both are genuine system-wide
+switches (not per-app hints) that work even while the camera is in use — the
+walkaway case — and unlike `modprobe -r uvcvideo` they act per-device. Each
+adapter remembers exactly which devices it turned off and restores only those on
+return, so a camera the user disabled themselves is never re-enabled. Toggling a
+device needs elevated privileges; where the app lacks them the calls fail and it
 degrades to the safe `UnsupportedCamera` behaviour — the controller logs the
-error and leaves the camera alone while still muting the mic. The bind/unbind
-logic is fully unit-tested behind an injected sysfs seam (no root or webcam
-required). macOS/Windows backends can implement the same `Camera` port later
-without touching the core.
+error and leaves the camera alone while still muting the mic.
+
+**One microphone port, native on each OS.** On Windows `WindowsMicrophone` mutes
+the default *communications* capture endpoint through the WASAPI Core Audio
+`IAudioEndpointVolume` interface; on Linux `PulseMicrophone` drives the default
+source through `pactl` (PulseAudio / PipeWire). Both implement the same
+`Microphone` port, so the controller is identical across platforms.
+
+**Portable by construction, tested without hardware.** Every OS adapter hides its
+platform calls behind a small injected seam — `CommandRunner`, `Sysfs`,
+`EndpointVolume`, `CameraDevices` — so all the decision logic (which devices to
+toggle, what to restore, how failures propagate) is unit-tested against fakes on
+any machine, with no audio server, webcam, or root required. The actual
+`windows`-crate syscalls compile only on Windows (a target-gated dependency), and
+the composition root selects the host's native pair at compile time via
+`PlatformMicrophone` / `PlatformCamera` — no runtime `dyn`, and other OS backends
+(e.g. macOS) can be added later without touching the core.
 
 ---
 
@@ -98,7 +114,10 @@ crates/
   eventbus/      Application: synchronous in-process pub/sub
   application/   Use cases: WalkawayController + ports (device interfaces)
   adapters/      Infrastructure: OS adapters implementing the ports
-                 (SystemClock, PulseMicrophone, LinuxUvcCamera, UnsupportedCamera)
+                 (SystemClock; WindowsMicrophone/PulseMicrophone;
+                  WindowsCamera/LinuxUvcCamera/UnsupportedCamera). The host's
+                  native pair is chosen at compile time via PlatformMicrophone /
+                  PlatformCamera + default_microphone() / default_camera().
 src-tauri/       UI/OS: the Tauri app that composes the above and hosts the UI
 src/             UI: the React + TypeScript Settings front end
 presence-detector/  Infrastructure: Python webcam presence sidecar
@@ -173,24 +192,32 @@ breaking existing files. Example:
 
 ## Building & testing
 
-The logic crates require only a Rust toolchain (1.75+):
+The logic crates require only a Rust toolchain (1.75+) and build on every OS —
+the native Windows device code is target-gated, so a non-Windows `cargo test`
+never pulls in the `windows` crate:
 
 ```bash
-cargo test --workspace          # run all unit tests
+cargo test --workspace          # run all unit tests (any OS)
 cargo clippy --workspace --all-targets -- -D warnings
+
+# Verify the Windows adapters from another OS without a Windows box:
+cargo clippy -p amow-adapters --all-targets --target x86_64-pc-windows-gnu -- -D warnings
 ```
 
 ### Running the desktop app
 
 The Tauri shell additionally needs Node.js and the platform webview
-dependencies (on Linux: `webkit2gtk-4.1`, `gtk3`, `libsoup-3` — see the Tauri
-v2 prerequisites for your OS), plus `pactl` for microphone control.
+dependencies. On **Linux**: `webkit2gtk-4.1`, `gtk3`, `libsoup-3` (see the Tauri
+v2 prerequisites for your OS), plus `pactl` for microphone control. On
+**Windows**: WebView2 (preinstalled on Windows 10/11) and the MSVC build tools;
+microphone and camera control use built-in OS APIs, no extra runtime.
 
-Camera control (`auto_camera_off`) drives the `uvcvideo` driver through sysfs,
-which needs permission to write `/sys/bus/usb/drivers/uvcvideo/{bind,unbind}` —
-typically a udev rule granting your user access, or running with the required
-privilege. Without it the app keeps working: the camera is left untouched and
-the microphone is still muted.
+Camera control (`auto_camera_off`) is a real OS-level switch that needs elevated
+privileges to toggle the device. On Linux it writes
+`/sys/bus/usb/drivers/uvcvideo/{bind,unbind}` (grant access with a udev rule or
+run privileged); on Windows it enables/disables the camera device node via
+SetupAPI (run elevated / as administrator). Without the privilege the app keeps
+working: the camera is left untouched and the microphone is still muted.
 
 Presence detection is launched automatically as a sidecar. Install its optional
 dependencies (`pip install -e 'presence-detector[camera]'`, which pulls in

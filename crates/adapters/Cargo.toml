@@ -7,3 +7,15 @@ rust-version.workspace = true
 
 [dependencies]
 amow-application = { workspace = true }
+
+# Native Windows device control (WASAPI mic + SetupAPI camera). Target-gated so
+# non-Windows builds — including this project's Linux CI — never resolve or
+# compile it; the Windows-only adapter modules are `#[cfg(target_os = "windows")]`.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_Devices_DeviceAndDriverInstallation",
+] }
