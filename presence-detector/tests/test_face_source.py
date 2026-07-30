@@ -40,19 +40,36 @@ def _install_fake_cv2(capture: FakeCapture) -> ModuleType:
     return cv2
 
 
-def _install_fake_mediapipe(detector_factory) -> ModuleType:
+_MEDIAPIPE_MODULES = (
+    "mediapipe",
+    "mediapipe.solutions",
+    "mediapipe.solutions.face_detection",
+)
+
+
+def _install_fake_mediapipe(detector_factory) -> None:
+    """Register a fake mediapipe whose face-detection *submodule* is importable.
+
+    The code under test does ``from mediapipe(.python).solutions import
+    face_detection``, so the fake must exist as real ``sys.modules`` entries,
+    not merely as an attribute on the top-level module.
+    """
     mp = ModuleType("mediapipe")
-    mp.solutions = SimpleNamespace(  # type: ignore[attr-defined]
-        face_detection=SimpleNamespace(FaceDetection=detector_factory)
-    )
+    solutions = ModuleType("mediapipe.solutions")
+    face_detection = ModuleType("mediapipe.solutions.face_detection")
+    face_detection.FaceDetection = detector_factory  # type: ignore[attr-defined]
+    solutions.face_detection = face_detection  # type: ignore[attr-defined]
+    mp.solutions = solutions  # type: ignore[attr-defined]
     sys.modules["mediapipe"] = mp
-    return mp
+    sys.modules["mediapipe.solutions"] = solutions
+    sys.modules["mediapipe.solutions.face_detection"] = face_detection
 
 
 class OpenAtomicityTests(unittest.TestCase):
     def tearDown(self) -> None:
         sys.modules.pop("cv2", None)
-        sys.modules.pop("mediapipe", None)
+        for name in _MEDIAPIPE_MODULES:
+            sys.modules.pop(name, None)
 
     def test_detector_failure_releases_camera_and_raises_capture_error(self) -> None:
         capture = FakeCapture(opened=True)

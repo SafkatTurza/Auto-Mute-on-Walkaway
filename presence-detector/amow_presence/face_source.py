@@ -67,10 +67,21 @@ class MediaPipeFaceSource:
             return
         try:
             import cv2
-            import mediapipe as mp
+
+            # Import the face-detection solution as an explicit submodule rather
+            # than reaching for `mediapipe.solutions` as an attribute. On several
+            # mediapipe builds `import mediapipe as mp` leaves `mp.solutions`
+            # unpopulated (its __init__ swallows the optional import), so the
+            # attribute lookup raises a bare "module 'mediapipe' has no attribute
+            # 'solutions'". A direct submodule import loads it regardless, or
+            # surfaces the real underlying import error instead of hiding it.
+            try:
+                from mediapipe.python.solutions import face_detection as mp_face
+            except ImportError:
+                from mediapipe.solutions import face_detection as mp_face
         except ImportError as exc:  # pragma: no cover - depends on host packages
             raise FaceSourceError(
-                "opencv-python and mediapipe are required to run the live detector"
+                f"opencv-python and mediapipe are required to run the live detector: {exc}"
             ) from exc
 
         capture = cv2.VideoCapture(self._camera_index)
@@ -79,7 +90,7 @@ class MediaPipeFaceSource:
             raise FaceSourceError(f"could not open camera index {self._camera_index}")
 
         try:
-            detector = mp.solutions.face_detection.FaceDetection(
+            detector = mp_face.FaceDetection(
                 model_selection=self._model_selection,
                 min_detection_confidence=self._min_detection_confidence,
             )
