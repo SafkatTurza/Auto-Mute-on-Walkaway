@@ -28,7 +28,7 @@ pub fn save_config(new_config: AppConfig, state: State<AppState>) -> Result<(), 
     Ok(())
 }
 
-/// Latest presence / meeting / protection snapshot for the UI.
+/// Latest presence / protection snapshot for the UI.
 #[tauri::command]
 pub fn get_status(state: State<AppState>) -> Status {
     state.status.snapshot()

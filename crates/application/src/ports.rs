@@ -7,7 +7,7 @@
 
 /// Error returned by an infrastructure port. Kept as a message plus a
 /// recoverable flag; the application logs it and continues rather than crashing
-/// — a failed mute must never take the app down mid-meeting.
+/// — a failed mute must never take the app down mid-call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortError {
     pub message: String,

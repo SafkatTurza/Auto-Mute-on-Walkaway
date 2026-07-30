@@ -41,8 +41,7 @@ where
     behavior: BehaviorConfig,
     presence: PresenceTracker,
     /// The master switch: protection only ever engages while this is on. It is
-    /// toggled by the user (and, later, could be driven by any policy source)
-    /// and replaces the former meeting gate.
+    /// toggled by the user (and, later, could be driven by any policy source).
     enabled: bool,
     clock: CK,
     mic: MIC,
