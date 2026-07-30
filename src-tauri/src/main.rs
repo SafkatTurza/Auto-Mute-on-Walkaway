@@ -8,6 +8,7 @@
 //! logic, installs the tray, and exposes the Tauri commands. It holds no
 //! business logic itself — that all lives in the tested crates.
 
+mod bridge;
 mod commands;
 mod notifier;
 mod status;
@@ -24,6 +25,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
+use bridge::PresenceBridge;
 use notifier::AppNotifier;
 use status::SharedStatus;
 use supervisor::Supervisor;
@@ -34,6 +36,8 @@ pub struct AppState {
     pub status: SharedStatus,
     pub config_path: PathBuf,
     pub config: Mutex<AppConfig>,
+    /// Kept alive for the app's lifetime; dropping it stops the webcam sidecar.
+    _presence_bridge: PresenceBridge,
 }
 
 fn main() {
@@ -89,11 +93,18 @@ fn main() {
                 logger.clone(),
             );
 
+            // --- Presence bridge: spawn the webcam sidecar and feed samples ---
+            // in through the supervisor. Degrades gracefully to manual input if
+            // the sidecar can't start, so the app is never blocked on it.
+            let presence_bridge =
+                PresenceBridge::spawn(&config_path, supervisor.face_sink(), logger.clone());
+
             app.manage(AppState {
                 supervisor,
                 status: shared_status,
                 config_path,
                 config: Mutex::new(config),
+                _presence_bridge: presence_bridge,
             });
 
             install_tray(app)?;

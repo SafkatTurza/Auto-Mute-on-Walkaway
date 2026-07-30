@@ -304,3 +304,123 @@ fn set_behavior_applies_to_next_reconcile() {
     walk_away(&mut c, &h);
     assert!(h.mic.value(), "runtime behavior change should take effect");
 }
+
+// --- End-to-end integration through the presence-sidecar contract -------------
+//
+// These drive the *whole* walkaway pipeline exactly as the running app does:
+// raw JSON lines from the presence detector are parsed by the public
+// `presence_source` translator, fed to the controller as face samples, and the
+// controller drives the device ports and the event bus. Nothing here reaches
+// past the public API — it is the same path the Tauri bridge uses, minus the
+// OS process. This is the "complete user flow" verification.
+
+/// Feed one raw sidecar stdout line through the real parser into the controller.
+/// A line the parser rejects is silently ignored, just as the bridge does.
+fn feed_line(c: &mut TestController, raw: &str) {
+    if let Some(report) = parse_line(raw) {
+        c.on_face_sample(report.face_present());
+    }
+}
+
+fn presence_line(state: &str, at_ms: i64) -> String {
+    format!(r#"{{"type":"presence","state":"{state}","at_ms":{at_ms}}}"#)
+}
+
+#[test]
+fn full_flow_from_sidecar_lines_mutes_then_restores() {
+    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+
+    // In a meeting, user confirmed present: no action yet.
+    h.at(0);
+    c.on_meeting_sample(true);
+    feed_line(&mut c, &presence_line("present", 0));
+    assert!(!c.is_protecting(), "present user must not be protected");
+
+    // Face lost: `leaving` is the raw edge, `away` reaffirms it. The domain
+    // tracker owns the delay, so protection engages only once its away grace
+    // (1000ms) has elapsed — not on the sidecar's phase alone.
+    feed_line(&mut c, &presence_line("leaving", 10));
+    assert!(
+        !c.is_protecting(),
+        "must wait out the configured away grace"
+    );
+    h.at(1_000);
+    feed_line(&mut c, &presence_line("away", 1_000));
+    assert!(h.mic.value(), "mic muted after walkaway");
+    assert!(!h.cam.value(), "camera disabled after walkaway");
+    assert!(c.is_protecting());
+
+    // Face regained: `returning` edge starts the return grace (500ms); once it
+    // elapses the user is Present again and prior state is restored.
+    h.at(1_000);
+    feed_line(&mut c, &presence_line("returning", 1_000));
+    assert!(c.is_protecting(), "still protected during return grace");
+    h.at(1_500);
+    feed_line(&mut c, &presence_line("present", 1_500));
+    assert!(!h.mic.value(), "mic unmuted on return");
+    assert!(h.cam.value(), "camera re-enabled on return");
+    assert!(!c.is_protecting());
+
+    // Every action was announced on the event bus, in order.
+    let kinds: Vec<&str> = h
+        .events()
+        .iter()
+        .map(|e| match e {
+            DomainEvent::MeetingChanged { .. } => "meeting",
+            DomainEvent::PresenceChanged { .. } => "presence",
+            DomainEvent::DeviceProtected { .. } => "protected",
+            DomainEvent::DeviceRestored { .. } => "restored",
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "meeting",
+            "presence", // away
+            "protected",
+            "protected", // mic, camera
+            "presence",  // present
+            "restored",
+            "restored", // mic, camera
+        ]
+    );
+}
+
+#[test]
+fn flickering_face_edges_do_not_trip_protection_early() {
+    // A dropped frame or two (leaving) that recovers before the away grace must
+    // never mute — the debounce in the domain absorbs the noise even though the
+    // sidecar reported transitional phases.
+    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    h.at(0);
+    c.on_meeting_sample(true);
+
+    feed_line(&mut c, &presence_line("leaving", 0)); // face blips out
+    h.at(400);
+    feed_line(&mut c, &presence_line("returning", 400)); // and back
+    feed_line(&mut c, &presence_line("present", 400));
+    h.at(2_000);
+    feed_line(&mut c, &presence_line("present", 2_000));
+
+    assert!(!c.is_protecting(), "transient blips must not protect");
+    assert!(!h.mic.value());
+    assert!(h.cam.value());
+}
+
+#[test]
+fn malformed_sidecar_lines_are_ignored_without_affecting_state() {
+    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    h.at(0);
+    c.on_meeting_sample(true);
+
+    // Garbage, a stray diagnostic on stdout, and a wrong-type message: all no-ops.
+    feed_line(&mut c, "not json at all");
+    feed_line(&mut c, "detector started at 15.0 FPS");
+    feed_line(&mut c, r#"{"type":"meeting","state":"away","at_ms":1}"#);
+    h.at(5_000);
+    feed_line(&mut c, "");
+
+    assert!(!c.is_protecting(), "no valid away report ever arrived");
+    assert_eq!(h.mic.writes(), 0);
+    assert_eq!(h.cam.writes(), 0);
+}

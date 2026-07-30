@@ -16,6 +16,8 @@ dependencies = [
  "amow-config",
  "amow-domain",
  "amow-eventbus",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

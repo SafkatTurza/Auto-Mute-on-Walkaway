@@ -7,8 +7,10 @@
 //! ends. It emits [`DomainEvent`]s onto the event bus for the rest of the app.
 
 mod ports;
+pub mod presence_source;
 
 pub use ports::{Camera, Clock, Microphone, Notifier, PortError, PortResult};
+pub use presence_source::{parse_line, DetectorPhase, PresenceReport};
 
 use amow_config::BehaviorConfig;
 use amow_domain::{

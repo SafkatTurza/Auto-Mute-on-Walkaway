@@ -73,6 +73,18 @@ impl Supervisor {
         let _ = self.tx.send(Msg::SetFace(present));
     }
 
+    /// A cheap, cloneable sink for face-presence samples.
+    ///
+    /// Handed to the presence bridge so an external source (the webcam sidecar)
+    /// can feed samples into the controller without touching the supervisor's
+    /// internal message channel. Sending the raw sample keeps *all* debounce and
+    /// policy inside the controller — the sink carries no logic.
+    pub fn face_sink(&self) -> FaceSink {
+        FaceSink {
+            tx: self.tx.clone(),
+        }
+    }
+
     /// Apply an updated configuration at runtime.
     pub fn update_config(&self, config: AppConfig) {
         let _ = self.tx.send(Msg::UpdateConfig(Box::new(config)));
@@ -85,6 +97,23 @@ impl Drop for Supervisor {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
+    }
+}
+
+/// A write-only handle for pushing face-presence samples at the supervisor.
+///
+/// Opaque on purpose: it exposes only `set`, keeping the message protocol
+/// private while letting the presence bridge live in its own module.
+#[derive(Clone)]
+pub struct FaceSink {
+    tx: Sender<Msg>,
+}
+
+impl FaceSink {
+    /// Report the latest face-presence sample. A closed channel (app shutting
+    /// down) is ignored — there is nothing left to protect.
+    pub fn set(&self, present: bool) {
+        let _ = self.tx.send(Msg::SetFace(present));
     }
 }
 

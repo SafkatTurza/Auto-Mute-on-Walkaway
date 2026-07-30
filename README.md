@@ -30,7 +30,7 @@ is completed to production quality — with tests — before the next is started
 | Tauri wiring  | UI / OS        | ✅ Done      |
 | Camera        | Infrastructure | ✅ Done (Linux, `uvcvideo` bind/unbind — see below) |
 | Presence capture (MediaPipe) | Infrastructure | ✅ Done (Python sidecar, see `presence-detector/`) |
-| Host bridge (sidecar → Event Bus) | Application | ⏳ Next |
+| Host bridge (sidecar → Event Bus) | UI / OS | ✅ Done (spawns the sidecar, feeds presence in) |
 | Meeting detection | Infrastructure | ⏳ Next  |
 
 The **entire walkaway decision logic — presence debouncing, meeting gating,
@@ -40,17 +40,27 @@ owns the controller, the microphone is really muted through `pactl`, actions
 raise desktop notifications, a tray gives show/quit, and a React Settings panel
 edits the persisted config live.
 
-**Presence detection is implemented as a local sidecar.** The webcam +
-MediaPipe presence detector lives in [`presence-detector/`](presence-detector/)
-as a self-contained Python module (OpenCV + MediaPipe have no production-grade
-Rust binding). It watches the camera on-device and emits `present` / `leaving` /
-`away` / `returning` events as newline-delimited JSON on stdout — the Event Bus
-contract. It holds no business logic and controls no devices; it only reports
-presence. The remaining wiring is the **host bridge**: the Tauri supervisor
-spawning that sidecar and translating its event lines onto the in-process
-`EventBus`. Until that bridge and the meeting detector land, the Settings window
-exposes two manual inputs — *"In a meeting"* and *"Away"* — that drive the
-**real** protection path (they mute your actual mic).
+**Presence detection is implemented as a local sidecar, now wired end-to-end.**
+The webcam + MediaPipe presence detector lives in
+[`presence-detector/`](presence-detector/) as a self-contained Python module
+(OpenCV + MediaPipe have no production-grade Rust binding). It watches the
+camera on-device and emits `present` / `leaving` / `away` / `returning` events
+as newline-delimited JSON on stdout — the Event Bus contract. It holds no
+business logic and controls no devices; it only reports presence.
+
+The **host bridge** (`src-tauri/src/bridge.rs`) closes the loop: on startup it
+spawns the sidecar, reads its event lines, and translates each into a
+face-presence sample fed to the controller — which then drives mute / camera-off
+/ restore and announces every action on the `EventBus`. The translation is a
+small, tested unit (`amow_application::presence_source`); crucially it maps on
+*face visibility*, so the sidecar's transitional `leaving` / `returning` edges
+pass straight through and the **single** configurable debounce stays in the core
+(`presence.away_grace_ms` / `return_grace_ms`) — never duplicated across the two
+processes. Only presence phases cross the process boundary; no camera frame ever
+does. If the sidecar cannot start (no Python, no camera), the app logs it and
+falls back to the manual *"Away"* toggle. Meeting state still comes from the
+manual *"In a meeting"* toggle until the meeting detector lands; both toggles
+drive the **real** protection path (they mute your actual mic).
 
 **Camera control is real, at the OS level.** The `LinuxUvcCamera` adapter
 enables and disables the webcam by binding / unbinding it from the `uvcvideo`
@@ -119,7 +129,8 @@ Key design choices that keep this honest and testable:
 
 ### How the walkaway logic works
 
-1. A presence sample (`face_present: bool`) arrives each tick. `PresenceTracker`
+1. A presence sample (`face_present: bool`) arrives each tick — from the webcam
+   sidecar via the host bridge, or from the manual toggle. `PresenceTracker`
    debounces it — a face must be *continuously* absent for a grace period before
    the user is declared `Away`, and continuously present before `Present`. This
    rejects single dropped frames.
@@ -179,6 +190,15 @@ which needs permission to write `/sys/bus/usb/drivers/uvcvideo/{bind,unbind}` �
 typically a udev rule granting your user access, or running with the required
 privilege. Without it the app keeps working: the camera is left untouched and
 the microphone is still muted.
+
+Presence detection is launched automatically as a sidecar. Install its optional
+dependencies (`pip install -e 'presence-detector[camera]'`, which pulls in
+`opencv-python` and `mediapipe`) so the webcam detector can run. The bridge
+finds the module beside the executable or under `presence-detector/` in the
+working directory; override the interpreter, module location, or disable it
+entirely with `AMOW_PRESENCE_PYTHON`, `AMOW_PRESENCE_DIR`, and
+`AMOW_PRESENCE_DISABLE=1`. If it can't start, the app falls back to the manual
+*"Away"* toggle.
 
 ```bash
 npm install                 # front-end dependencies
