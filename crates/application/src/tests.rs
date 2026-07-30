@@ -23,6 +23,9 @@ struct DeviceCell {
     /// Reads succeed but writes fail — models a camera that is visible/queryable
     /// but cannot be toggled without elevated privileges.
     fail_write: AtomicBool,
+    /// The adapter reports it cannot guarantee a re-enable — models the Windows
+    /// camera when the app is not elevated (`can_restore() == false`).
+    no_restore: AtomicBool,
 }
 impl DeviceCell {
     fn new(v: bool) -> Self {
@@ -31,6 +34,7 @@ impl DeviceCell {
             writes: AtomicU32::new(0),
             fail: AtomicBool::new(false),
             fail_write: AtomicBool::new(false),
+            no_restore: AtomicBool::new(false),
         }
     }
     fn value(&self) -> bool {
@@ -44,6 +48,9 @@ impl DeviceCell {
     }
     fn set_fail_write(&self) {
         self.fail_write.store(true, REL);
+    }
+    fn set_no_restore(&self) {
+        self.no_restore.store(true, REL);
     }
 }
 
@@ -88,6 +95,9 @@ impl Camera for FakeCam {
         self.0.writes.fetch_add(1, REL);
         Ok(())
     }
+    fn can_restore(&self) -> bool {
+        !self.0.no_restore.load(REL)
+    }
 }
 
 #[derive(Clone, Default)]
@@ -124,6 +134,17 @@ fn presence_cfg() -> PresenceConfig {
     PresenceConfig {
         away_grace_ms: 1_000,
         return_grace_ms: 500,
+    }
+}
+
+/// Behavior with every automatic action on, including `auto_camera_off`.
+///
+/// The shipped default now leaves `auto_camera_off` *off* (camera control is
+/// opt-in), so tests that exercise camera protection ask for it explicitly.
+fn all_on() -> BehaviorConfig {
+    BehaviorConfig {
+        auto_camera_off: true,
+        ..BehaviorConfig::default()
     }
 }
 
@@ -175,7 +196,7 @@ fn walk_away(c: &mut TestController, h: &Handles) {
 
 #[test]
 fn mutes_and_disables_on_walkaway_when_enabled() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     walk_away(&mut c, &h);
     assert!(h.mic.value(), "mic should be muted");
     assert!(!h.cam.value(), "camera should be disabled");
@@ -184,7 +205,7 @@ fn mutes_and_disables_on_walkaway_when_enabled() {
 
 #[test]
 fn does_nothing_when_protection_disabled() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     // Never enabled: walking away must not touch any device.
     h.at(0);
     c.on_face_sample(false);
@@ -197,7 +218,7 @@ fn does_nothing_when_protection_disabled() {
 
 #[test]
 fn enabling_protection_while_already_away_engages_immediately() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     // User is away first (grace elapsed), protection still off: nothing happens.
     h.at(0);
     c.on_face_sample(false);
@@ -213,7 +234,7 @@ fn enabling_protection_while_already_away_engages_immediately() {
 
 #[test]
 fn restores_previous_state_on_return() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     walk_away(&mut c, &h);
     h.at(1_000);
     c.on_face_sample(true);
@@ -226,7 +247,7 @@ fn restores_previous_state_on_return() {
 
 #[test]
 fn does_not_touch_a_mic_the_user_already_muted() {
-    let (mut c, h) = build(BehaviorConfig::default(), true, true);
+    let (mut c, h) = build(all_on(), true, true);
     walk_away(&mut c, &h);
     h.at(1_000);
     c.on_face_sample(true);
@@ -238,7 +259,7 @@ fn does_not_touch_a_mic_the_user_already_muted() {
 
 #[test]
 fn restores_when_protection_disabled_while_away() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     walk_away(&mut c, &h);
     h.at(1_000);
     c.set_enabled(false);
@@ -251,6 +272,7 @@ fn restores_when_protection_disabled_while_away() {
 fn respects_disabled_auto_restore() {
     let behavior = BehaviorConfig {
         auto_restore: false,
+        auto_camera_off: true,
         ..BehaviorConfig::default()
     };
     let (mut c, h) = build(behavior, false, true);
@@ -281,7 +303,7 @@ fn respects_selective_behavior_flags() {
 
 #[test]
 fn mic_port_failure_does_not_crash_and_still_handles_camera() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     h.mic.set_fail();
     walk_away(&mut c, &h);
     assert!(!h.cam.value(), "camera should still be disabled");
@@ -290,7 +312,7 @@ fn mic_port_failure_does_not_crash_and_still_handles_camera() {
 
 #[test]
 fn exposes_live_device_state_for_the_ui() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     // Idle: nothing engaged.
     assert!(!c.mic_muted_by_app());
     assert!(!c.camera_disabled_by_app());
@@ -314,7 +336,7 @@ fn exposes_live_device_state_for_the_ui() {
 fn camera_blocked_is_reported_when_disable_is_denied() {
     // A live camera that cannot be toggled (no privilege): the mic is still
     // muted, and the UI is told the camera was blocked rather than silently off.
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     h.cam.set_fail_write();
     walk_away(&mut c, &h);
 
@@ -327,10 +349,31 @@ fn camera_blocked_is_reported_when_disable_is_denied() {
 }
 
 #[test]
+fn never_disables_a_camera_it_cannot_restore() {
+    // The safety invariant: if the adapter cannot guarantee it could re-enable
+    // the camera (e.g. the app is not running elevated on Windows, where both
+    // directions need admin), the controller must not switch it off at all —
+    // never touching it is the only way to guarantee it is never left dark.
+    let (mut c, h) = build(all_on(), false, true);
+    h.cam.set_no_restore();
+    walk_away(&mut c, &h);
+
+    assert!(c.is_protecting());
+    assert!(h.mic.value(), "mic is still protected");
+    assert!(h.cam.value(), "camera left ON — never disabled");
+    assert_eq!(h.cam.writes(), 0, "the camera was never written to");
+    assert!(!c.camera_disabled_by_app());
+    assert!(
+        c.camera_blocked(),
+        "UI is told camera control is blocked (run as administrator)"
+    );
+}
+
+#[test]
 fn shutdown_restores_devices_it_changed() {
     // The clean-exit contract: quitting while protecting must un-mute the mic and
     // re-enable the camera the app disabled.
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     walk_away(&mut c, &h);
     assert!(h.mic.value() && !h.cam.value(), "protected before shutdown");
 
@@ -347,6 +390,7 @@ fn shutdown_restores_even_when_auto_restore_is_off() {
     // down must still restore them — a disabled camera must never outlive the app.
     let behavior = BehaviorConfig {
         auto_restore: false,
+        auto_camera_off: true,
         ..BehaviorConfig::default()
     };
     let (mut c, h) = build(behavior, false, true);
@@ -369,7 +413,7 @@ fn shutdown_restores_even_when_auto_restore_is_off() {
 #[test]
 fn shutdown_without_protection_touches_nothing() {
     // Quitting while idle (never walked away) must not write to any device.
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     c.set_enabled(true);
     c.shutdown();
     assert_eq!(
@@ -390,7 +434,7 @@ fn shutdown_does_not_touch_devices_the_user_had_set() {
     // The user muted their own mic and disabled their own camera before walking
     // away; the app engaged an (empty) episode. Shutdown must leave both as the
     // user set them — it only reverts the app's own changes.
-    let (mut c, h) = build(BehaviorConfig::default(), true, false);
+    let (mut c, h) = build(all_on(), true, false);
     walk_away(&mut c, &h);
     assert!(
         c.is_protecting(),
@@ -407,7 +451,7 @@ fn shutdown_does_not_touch_devices_the_user_had_set() {
 
 #[test]
 fn emits_expected_event_sequence() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     walk_away(&mut c, &h);
     let kinds: Vec<&str> = h
         .events()
@@ -423,7 +467,7 @@ fn emits_expected_event_sequence() {
 
 #[test]
 fn notifies_on_action_when_enabled() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     walk_away(&mut c, &h);
     assert_eq!(
         h.notifications(),
@@ -468,7 +512,7 @@ fn presence_line(state: &str, at_ms: i64) -> String {
 
 #[test]
 fn full_flow_from_sidecar_lines_mutes_then_restores() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
 
     // Protection enabled, user confirmed present: no action yet.
     h.at(0);
@@ -529,7 +573,7 @@ fn flickering_face_edges_do_not_trip_protection_early() {
     // A dropped frame or two (leaving) that recovers before the away grace must
     // never mute — the debounce in the domain absorbs the noise even though the
     // sidecar reported transitional phases.
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     h.at(0);
     c.set_enabled(true);
 
@@ -547,7 +591,7 @@ fn flickering_face_edges_do_not_trip_protection_early() {
 
 #[test]
 fn malformed_sidecar_lines_are_ignored_without_affecting_state() {
-    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    let (mut c, h) = build(all_on(), false, true);
     h.at(0);
     c.set_enabled(true);
 

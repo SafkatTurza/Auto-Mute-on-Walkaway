@@ -47,6 +47,19 @@ pub trait Microphone {
 pub trait Camera {
     fn is_enabled(&self) -> PortResult<bool>;
     fn set_enabled(&self, enabled: bool) -> PortResult<()>;
+
+    /// Whether the adapter can guarantee it is able to *re-enable* the camera
+    /// after disabling it.
+    ///
+    /// When this is false the controller must not disable the camera at all:
+    /// switching off a device it cannot switch back on is exactly the failure
+    /// that leaves a webcam dark after the app is gone. Windows camera control
+    /// needs administrator rights in *both* directions, so the native adapter
+    /// reports false when the app is not elevated. The default is true for
+    /// adapters with no such asymmetry (or that fail closed on `set_enabled`).
+    fn can_restore(&self) -> bool {
+        true
+    }
 }
 
 /// Shows a transient desktop notification.

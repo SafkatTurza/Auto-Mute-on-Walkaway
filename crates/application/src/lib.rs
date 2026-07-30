@@ -208,7 +208,15 @@ where
             }
         }
 
-        if self.behavior.auto_camera_off {
+        if self.behavior.auto_camera_off && !self.camera.can_restore() {
+            // We could switch the camera off but cannot guarantee we could turn
+            // it back on (e.g. the app is not running elevated on Windows, where
+            // both directions need administrator rights). Refuse to disable a
+            // camera we cannot restore — that is precisely what leaves a webcam
+            // dark after the app exits — and flag it so the UI can tell the user
+            // to run as administrator. The mic is still protected.
+            protection.cam_blocked = true;
+        } else if self.behavior.auto_camera_off {
             match self.camera.is_enabled() {
                 Ok(true) => {
                     if self.camera.set_enabled(false).is_ok() {

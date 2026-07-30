@@ -73,10 +73,19 @@ unbound device disappears from `/dev/video*`. Both are genuine system-wide
 switches (not per-app hints) that work even while the camera is in use — the
 walkaway case — and unlike `modprobe -r uvcvideo` they act per-device. Each
 adapter remembers exactly which devices it turned off and restores only those on
-return, so a camera the user disabled themselves is never re-enabled. Toggling a
-device needs elevated privileges; where the app lacks them the calls fail and it
-degrades to the safe `UnsupportedCamera` behaviour — the controller logs the
-error and leaves the camera alone while still muting the mic.
+return, so a camera the user disabled themselves is never re-enabled. Camera
+control is **opt-in** (`auto_camera_off` defaults to *off*): the always-safe,
+elevation-free microphone mute is the default, and users enable OS-level camera
+control deliberately.
+
+**The app never disables a camera it could not turn back on.** Toggling a device
+node needs elevated privileges in *both* directions, so before switching the
+camera off the controller checks the adapter can also switch it on
+(`Camera::can_restore`; the Windows adapter reports whether the process is
+elevated). If it can't, the camera is left untouched and the UI is flagged to run
+as administrator — refusing to disable something it has no privilege to restore
+is the only way to guarantee the camera is never left dark. The microphone is
+still muted either way.
 
 **A disabled camera never outlives the app.** The webcam is re-enabled on every
 exit path: returning or turning Protection off restores it immediately; quitting
@@ -86,7 +95,9 @@ un-does its own changes even when `auto_restore` is off); and an unexpected exit
 adapter records the device ids it disabled to a file (`camera-recovery.txt` in
 the config dir) and clears it on restore, so the next launch re-enables exactly
 those devices before anything else runs. Only ids the app itself recorded are
-ever restored, so a camera the user disabled stays disabled.
+ever restored, so a camera the user disabled stays disabled. If that recovery
+launch is not elevated (so it can't run), the app surfaces a desktop notification
+instead of failing silently.
 
 **One microphone port, native on each OS.** On Windows `WindowsMicrophone` mutes
 the default *communications* capture endpoint through the WASAPI Core Audio
@@ -187,7 +198,7 @@ breaking existing files. Example:
   "version": 1,
   "behavior": {
     "auto_mute": true,
-    "auto_camera_off": true,
+    "auto_camera_off": false,
     "auto_restore": true,
     "notify_on_action": true,
     "sample_interval_ms": 500

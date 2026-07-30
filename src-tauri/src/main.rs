@@ -97,7 +97,20 @@ fn main() {
             // user disabled themselves — before anything else touches the camera.
             match default_camera(camera_recovery_path.clone()).recover() {
                 Ok(()) => {}
-                Err(e) => logger.warn(&format!("camera recovery on startup failed: {e}")),
+                Err(e) => {
+                    // Recovery was needed (a previous run left a camera off) but
+                    // could not complete — almost always because this launch is
+                    // not elevated. This must NOT be a silent log line: the user's
+                    // webcam is disabled and they need to know why and how to fix
+                    // it. Log at error level and pop a desktop notification.
+                    logger.error(&format!("camera recovery on startup failed: {e}"));
+                    AppNotifier::new(handle.clone()).notify(
+                        "Camera still disabled",
+                        "Auto-Mute couldn't re-enable your webcam automatically. \
+                         Run the app as administrator to restore it, or enable the \
+                         camera in Device Manager.",
+                    );
+                }
             }
 
             // --- Event bus: log every domain event and mirror it to the UI ----

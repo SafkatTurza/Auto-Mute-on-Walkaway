@@ -112,15 +112,22 @@ restarts because Windows is the source of truth. Toggle it off to unregister.
 
 ---
 
-## 5. Camera control needs elevation
+## 5. Camera control is opt-in and needs elevation
+
+**Camera disabling is off by default.** Out of the box the app only mutes your
+microphone on walkaway — that uses WASAPI, needs no special rights, and is always
+reversible. Turn on **Automatic actions → Disable camera** to opt in.
 
 Disabling a camera device toggles its device node (the same action as Device
-Manager's *Disable device*), which requires **administrator privileges**. To use
-`auto_camera_off`, run the app **as administrator**.
+Manager's *Disable device*), which requires **administrator privileges** in both
+directions — to switch it off *and* to switch it back on. To use camera control,
+run the app **as administrator** (the bundled `run-with-presence.ps1 -AsAdmin`
+does this for you).
 
-Without elevation the app still works and **degrades safely**: the camera is left
-untouched and the microphone is still muted. Microphone mute (WASAPI) does **not**
-require elevation.
+**The app never disables a camera it could not turn back on.** If camera control
+is enabled but the app is *not* running elevated, it leaves the camera untouched
+and flags it in the UI ("run as administrator") rather than switching off a
+device it has no privilege to restore. The microphone is still muted either way.
 
 ### The camera is never left disabled
 
@@ -131,7 +138,10 @@ Whenever the app disables your webcam, it re-enables it in every exit path:
   process exits, even if you had *Restore on return* switched off.
 - **Crash, force-kill, or power loss** — the app records the devices it disabled
   in `camera-recovery.txt` (next to `config.json`) and **re-enables them
-  automatically on the next launch**, before anything else runs.
+  automatically on the next launch**, before anything else runs. If that launch
+  is *not* elevated (so recovery can't run), the app tells you with a desktop
+  notification — **"Camera still disabled"** — instead of failing silently.
+  Relaunch as administrator, or re-enable the webcam in Device Manager.
 
 It only ever re-enables cameras it disabled itself — a webcam you turned off in
 Device Manager before starting the app is left exactly as you set it.
@@ -163,8 +173,15 @@ personal data.
   thread, source location, panic message, and a backtrace for the last crash.
 - **Mic doesn't mute.** Confirm a default *communications* capture device is set
   in Windows Sound settings; the app mutes that endpoint.
-- **Camera doesn't turn off.** Run the app **as administrator** (see §5). Verify
-  the webcam appears under the *Cameras* class in Device Manager.
+- **Camera doesn't turn off.** Camera control is opt-in — enable *Automatic
+  actions → Disable camera* — and run the app **as administrator** (see §5).
+  Verify the webcam appears under the *Cameras* class in Device Manager.
+- **Camera is stuck disabled / won't turn back on.** Open **Device Manager →
+  Cameras**, right-click your webcam and choose **Enable device**. (If that is
+  greyed out or it stays dead, choose **Uninstall device** — *without* deleting
+  the driver — then **Action → Scan for hardware changes**, or reboot.) Then
+  relaunch Auto-Mute **as administrator** so its automatic recovery can run; the
+  app re-enables cameras it disabled on the next elevated launch.
 - **No automatic presence.** The Python sidecar isn't running — install its
   `[camera]` extras, or use the manual **Away** toggle. Set
   `AMOW_PRESENCE_DISABLE=1` to skip the sidecar entirely.

@@ -196,6 +196,27 @@ impl<D: CameraDevices> Camera for WindowsCamera<D> {
             self.disable()
         }
     }
+
+    /// Only safe to disable the camera when the process can also re-enable it.
+    /// Toggling a device node needs administrator rights in both directions, so
+    /// without elevation the controller must not switch the camera off — that is
+    /// exactly what would leave it dark after the app exits.
+    fn can_restore(&self) -> bool {
+        is_elevated()
+    }
+}
+
+/// Whether the current process is running with an elevated (administrator)
+/// token. On non-Windows hosts (where this adapter is compiled only for its
+/// portable unit tests) there is no such gate, so it reports true.
+#[cfg(target_os = "windows")]
+fn is_elevated() -> bool {
+    real::is_elevated()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn is_elevated() -> bool {
+    true
 }
 
 // --- Real SetupAPI backend (Windows only) ------------------------------------
@@ -368,6 +389,38 @@ mod real {
 
     fn win_err(ctx: &'static str) -> impl Fn(windows::core::Error) -> PortError {
         move |e| PortError::new(format!("windows camera: {ctx}: {e}"))
+    }
+
+    /// Whether the current process token is elevated (running as administrator).
+    ///
+    /// Camera enable/disable both require elevation, so the controller consults
+    /// this before ever switching the camera off — a camera we could not turn
+    /// back on must not be turned off. Any failure to query the token is treated
+    /// as "not elevated", the safe answer (leave the camera alone).
+    pub fn is_elevated() -> bool {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::Security::{
+            GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+        };
+        use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+        unsafe {
+            let mut token = HANDLE::default();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+                return false;
+            }
+            let mut elevation = TOKEN_ELEVATION::default();
+            let mut returned = 0u32;
+            let ok = GetTokenInformation(
+                token,
+                TokenElevation,
+                Some(&mut elevation as *mut _ as *mut _),
+                std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+                &mut returned,
+            );
+            let _ = CloseHandle(token);
+            ok.is_ok() && elevation.TokenIsElevated != 0
+        }
     }
 }
 

@@ -39,6 +39,11 @@ pub struct BehaviorConfig {
     /// Mute the microphone when the user walks away (while protection is on).
     pub auto_mute: bool,
     /// Disable the camera when the user walks away (while protection is on).
+    ///
+    /// Off by default: disabling the camera toggles the OS device node (needs
+    /// administrator rights on Windows) and is the only action that could, in a
+    /// crash, briefly outlive the app. Microphone mute is the safe always-on
+    /// default; users opt into camera control deliberately.
     pub auto_camera_off: bool,
     /// Restore mic/camera to their prior state when the user returns.
     pub auto_restore: bool,
@@ -52,7 +57,7 @@ impl Default for BehaviorConfig {
     fn default() -> Self {
         Self {
             auto_mute: true,
-            auto_camera_off: true,
+            auto_camera_off: false,
             auto_restore: true,
             notify_on_action: true,
             sample_interval_ms: 500,
@@ -209,7 +214,8 @@ mod tests {
         // Only one nested field supplied; everything else must default.
         let cfg = AppConfig::from_json(r#"{"behavior":{"auto_mute":false}}"#).unwrap();
         assert!(!cfg.behavior.auto_mute);
-        assert!(cfg.behavior.auto_camera_off); // defaulted
+        assert!(!cfg.behavior.auto_camera_off); // defaulted (off by default)
+        assert!(cfg.behavior.auto_restore); // defaulted (on)
         assert_eq!(cfg.version, 1); // defaulted
     }
 
