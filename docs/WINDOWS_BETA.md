@@ -44,9 +44,15 @@ out of the box.
 
 **Optional — webcam presence detection**
 
-- Python 3.9+ with the detector's extras:
-  `pip install -e "presence-detector[camera]"` (pulls in `opencv-python` and
-  `mediapipe`). Without it, use the manual Away toggle.
+- **Python 3.9–3.12** (MediaPipe has no wheels for 3.13+) with the detector's
+  extras: `pip install -e "presence-detector[camera]"` (pulls in `opencv-python`
+  and `mediapipe`). Without it, use the manual Away toggle.
+- The detector package itself is **bundled into the installer**, and the app
+  **auto-discovers** a suitable Python (it prefers the `py -3.12` launcher and
+  an interpreter that can import the dependencies). So once Python and the extras
+  are installed, presence detection works on a **plain launch** — no script and
+  no environment variables required. `AMOW_PRESENCE_PYTHON` /
+  `AMOW_PRESENCE_DIR` still override the discovery if you need a specific setup.
 
 ---
 
@@ -92,13 +98,12 @@ a reproducible build.
      glance which is driving presence. The manual card dims itself while the
      webcam is active.
 
-> **Tip — one-click launch with presence.** Rather than setting the
-> `AMOW_PRESENCE_*` variables by hand, run the bundled helper from the repo
-> root: `./run-with-presence.ps1`. It finds a MediaPipe-capable Python
-> (3.9–3.12), checks the detector's dependencies, points the app at that
-> interpreter, and starts the app. Add `-AsAdmin` to run elevated (so the
-> camera can be disabled), `-Install` to install the detector's Python
-> dependencies first, or `-Dev` to run from source with `npm run tauri dev`.
+> **Tip — running elevated for camera control.** Presence detection works on a
+> plain launch (the app bundles the detector and finds Python itself). The
+> `./run-with-presence.ps1` helper is still handy when you want to run **as
+> administrator** so the camera can be disabled: `./run-with-presence.ps1
+> -AsAdmin`. It can also `-Install` the detector's Python dependencies, pin a
+> specific interpreter, or `-Dev` to run from source with `npm run tauri dev`.
 5. Adjust **Automatic actions** (mute mic / disable camera / restore / notify),
    **Timing** (sample interval and away/return grace), and **Logging**, then
    **Save settings**.

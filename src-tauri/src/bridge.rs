@@ -32,8 +32,9 @@ use crate::supervisor::FaceSink;
 
 /// Interpreter used to launch the sidecar (default `python3`).
 const ENV_PYTHON: &str = "AMOW_PRESENCE_PYTHON";
-/// Directory containing the `amow_presence` package (default: alongside the exe,
-/// then `presence-detector` in the working directory).
+/// Directory containing the `amow_presence` package (default: the copy bundled
+/// into the installer's resource dir, then alongside the exe, then
+/// `presence-detector` in the working directory).
 const ENV_DIR: &str = "AMOW_PRESENCE_DIR";
 /// Set to `1`/`true` to skip the sidecar entirely and rely on manual input.
 const ENV_DISABLE: &str = "AMOW_PRESENCE_DISABLE";
@@ -56,7 +57,12 @@ impl PresenceBridge {
     /// Always returns a handle — an inert one if the sidecar is disabled or
     /// fails to launch — so the caller never has to special-case the degraded
     /// path. Diagnostics go to `logger`.
-    pub fn spawn(config_path: &Path, sink: FaceSink, logger: Arc<Logger>) -> Self {
+    pub fn spawn(
+        config_path: &Path,
+        resource_dir: Option<PathBuf>,
+        sink: FaceSink,
+        logger: Arc<Logger>,
+    ) -> Self {
         let mut bridge = Self {
             child: None,
             threads: Vec::new(),
@@ -68,7 +74,7 @@ impl PresenceBridge {
             return bridge;
         }
 
-        match bridge.try_spawn(config_path, sink, &logger) {
+        match bridge.try_spawn(config_path, resource_dir.as_deref(), sink, &logger) {
             Ok(()) => logger.info("presence sidecar started"),
             Err(e) => logger.warn(&format!(
                 "presence sidecar unavailable ({e}); presence falls back to manual input"
@@ -80,11 +86,16 @@ impl PresenceBridge {
     fn try_spawn(
         &mut self,
         config_path: &Path,
+        resource_dir: Option<&Path>,
         sink: FaceSink,
         logger: &Arc<Logger>,
     ) -> std::io::Result<()> {
-        let python = env::var(ENV_PYTHON).unwrap_or_else(|_| "python3".to_string());
-        let dir = sidecar_dir();
+        let python = resolve_python();
+        let dir = sidecar_dir(resource_dir);
+        logger.info(&format!(
+            "presence sidecar: python={python}, dir={}",
+            dir.display()
+        ));
 
         let mut child = Command::new(&python)
             .args(["-m", "amow_presence", "--log-level", "warning", "--config"])
@@ -153,12 +164,21 @@ fn disabled() -> bool {
 
 /// Resolve the directory to run the sidecar from — the one holding the
 /// `amow_presence` package so `python -m amow_presence` imports it.
-fn sidecar_dir() -> PathBuf {
+///
+/// Order of preference: an explicit `AMOW_PRESENCE_DIR`; the copy bundled into
+/// the installer (under the Tauri resource dir); a `presence-detector` folder
+/// beside the executable; finally the repo layout for `tauri dev` runs from the
+/// project root.
+fn sidecar_dir(resource_dir: Option<&Path>) -> PathBuf {
     if let Ok(dir) = env::var(ENV_DIR) {
         return PathBuf::from(dir);
     }
-    // Prefer a `presence-detector` folder shipped beside the executable; fall
-    // back to the repo layout for `tauri dev` runs from the project root.
+    if let Some(res) = resource_dir {
+        let candidate = res.join("presence-detector");
+        if candidate.is_dir() {
+            return candidate;
+        }
+    }
     if let Ok(exe) = env::current_exe() {
         if let Some(candidate) = exe.parent().map(|p| p.join("presence-detector")) {
             if candidate.is_dir() {
@@ -167,6 +187,80 @@ fn sidecar_dir() -> PathBuf {
         }
     }
     PathBuf::from("presence-detector")
+}
+
+/// Choose the Python interpreter to launch the sidecar with.
+///
+/// An explicit `AMOW_PRESENCE_PYTHON` always wins. Otherwise the app discovers
+/// one itself — mirroring `run-with-presence.ps1` so a plain double-click works
+/// without setting env vars. It prefers an interpreter that can actually import
+/// the detector's dependencies (OpenCV + MediaPipe, which ship wheels only for
+/// Python 3.9–3.12), falling back to the first interpreter that merely runs so
+/// the sidecar can start and log a clear error rather than silently doing
+/// nothing.
+fn resolve_python() -> String {
+    if let Ok(p) = env::var(ENV_PYTHON) {
+        return p;
+    }
+
+    // Candidate launchers, best first: the Windows `py` launcher pinned to the
+    // MediaPipe-supported versions, then the generic interpreter names.
+    let candidates: &[&[&str]] = &[
+        &["py", "-3.12"],
+        &["py", "-3.11"],
+        &["py", "-3.10"],
+        &["py", "-3.9"],
+        &["python3"],
+        &["python"],
+        &["py"],
+    ];
+
+    let mut first_runnable: Option<String> = None;
+    for &cand in candidates {
+        if let Some(exe) = python_executable(cand) {
+            if first_runnable.is_none() {
+                first_runnable = Some(exe.clone());
+            }
+            if deps_importable(&exe) {
+                return exe;
+            }
+        }
+    }
+    first_runnable.unwrap_or_else(|| "python3".to_string())
+}
+
+/// Resolve a candidate launcher (e.g. `["py", "-3.12"]`) to the concrete
+/// interpreter path it runs, so the app can invoke it directly (the `py`
+/// launcher itself isn't re-invoked with the sidecar's args). `None` if the
+/// candidate can't be run.
+fn python_executable(cand: &[&str]) -> Option<String> {
+    let out = Command::new(cand[0])
+        .args(&cand[1..])
+        .args(["-c", "import sys; print(sys.executable)"])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if path.is_empty() {
+        None
+    } else {
+        Some(path)
+    }
+}
+
+/// Whether the detector's Python dependencies import in the given interpreter.
+fn deps_importable(exe: &str) -> bool {
+    Command::new(exe)
+        .args(["-c", "import cv2, mediapipe"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 impl Drop for PresenceBridge {

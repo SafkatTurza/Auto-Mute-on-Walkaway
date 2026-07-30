@@ -144,9 +144,16 @@ fn main() {
 
             // --- Presence bridge: spawn the webcam sidecar and feed samples ---
             // in through the supervisor. Degrades gracefully to manual input if
-            // the sidecar can't start, so the app is never blocked on it.
-            let presence_bridge =
-                PresenceBridge::spawn(&config_path, supervisor.face_sink(), logger.clone());
+            // the sidecar can't start, so the app is never blocked on it. The
+            // resource dir lets it find the `presence-detector` folder bundled
+            // into the installer, so a plain launch finds it with no env vars.
+            let resource_dir = app.path().resource_dir().ok();
+            let presence_bridge = PresenceBridge::spawn(
+                &config_path,
+                resource_dir,
+                supervisor.face_sink(),
+                logger.clone(),
+            );
 
             app.manage(AppState {
                 supervisor,
