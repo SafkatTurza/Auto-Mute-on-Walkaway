@@ -32,8 +32,20 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "publisher": "Auto-Mute on Walkaway",
+    "copyright": "Copyright © 2026 Auto-Mute on Walkaway contributors",
+    "homepage": "https://github.com/SafkatTurza/Auto-Mute-on-Walkaway",
+    "category": "Utility",
+    "shortDescription": "Auto-mute your mic and disable your camera when you step away.",
+    "longDescription": "A privacy-first desktop app that notices when you step away from your desk and automatically mutes your microphone and disables your camera, restoring both when you return. Everything runs locally — no camera frames, audio, images, or user data ever leave the machine.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   },
   "plugins": {}
 }

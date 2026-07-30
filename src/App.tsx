@@ -10,6 +10,7 @@ export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [present, setPresent] = useState(true);
+  const [autostart, setAutostart] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -26,6 +27,7 @@ export default function App() {
 
   useEffect(() => {
     api.getConfig().then(setConfig).catch((e) => setError(String(e)));
+    api.getAutostart().then(setAutostart).catch(() => {});
     refreshStatus();
 
     const timer = setInterval(refreshStatus, 1000);
@@ -76,6 +78,16 @@ export default function App() {
     setPresent(next);
     await api.setPresent(next);
     refreshStatus();
+  };
+
+  const toggleAutostart = async (next: boolean) => {
+    setError(null);
+    try {
+      await api.setAutostart(next);
+      setAutostart(next);
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   if (!config) {
@@ -161,6 +173,15 @@ export default function App() {
           label="Notify on action"
           checked={b.notify_on_action}
           onChange={(v) => setBehavior("notify_on_action", v)}
+        />
+      </section>
+
+      <section className="card">
+        <h2>Startup</h2>
+        <Toggle
+          label="Start automatically on login"
+          checked={autostart}
+          onChange={toggleAutostart}
         />
       </section>
 

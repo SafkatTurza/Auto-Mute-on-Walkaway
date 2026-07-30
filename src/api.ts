@@ -16,3 +16,8 @@ export const setEnabled = (enabled: boolean): Promise<void> =>
 
 export const setPresent = (present: boolean): Promise<void> =>
   invoke("set_present", { present });
+
+export const getAutostart = (): Promise<boolean> => invoke("get_autostart");
+
+export const setAutostart = (enabled: boolean): Promise<void> =>
+  invoke("set_autostart", { enabled });

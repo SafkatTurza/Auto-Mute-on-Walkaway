@@ -10,6 +10,7 @@
 
 mod bridge;
 mod commands;
+mod crash;
 mod notifier;
 mod status;
 mod supervisor;
@@ -22,8 +23,9 @@ use amow_domain::DomainEvent;
 use amow_eventbus::EventBus;
 use amow_logger::{FileSink, LogSink, Logger, StderrSink};
 use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
+use tauri_plugin_autostart::MacosLauncher;
 
 use bridge::PresenceBridge;
 use notifier::AppNotifier;
@@ -43,12 +45,21 @@ pub struct AppState {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        // Auto-start on login (opt-in; toggled from Settings). No launch args —
+        // it starts like a normal launch, with the window shown and the tray
+        // installed.
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             let handle = app.handle();
 
             // --- Paths: config and logs live in the OS app data dirs ----------
             let config_path = app.path().app_config_dir()?.join("config.json");
-            let log_path = app.path().app_log_dir()?.join("amow.log");
+            let log_dir = app.path().app_log_dir()?;
+            let log_path = log_dir.join("amow.log");
+            let crash_path = log_dir.join("crash.log");
 
             // --- Config: first run bootstraps a default file ------------------
             let config = AppConfig::load_or_init(&config_path).unwrap_or_else(|e| {
@@ -66,6 +77,12 @@ fn main() {
             };
             let logger = Arc::new(Logger::new(config.logging.level, sink));
             logger.info("Auto-Mute on Walkaway starting");
+
+            // --- Crash logging: capture panics to crash.log -------------------
+            // Installed early so any later panic (device I/O on the supervisor
+            // thread, sidecar reader threads, command handlers) leaves a trace
+            // even in a windowed release build with no console.
+            crash::install(crash_path, logger.clone());
 
             // --- Event bus: log every domain event and mirror it to the UI ----
             let bus = EventBus::new();
@@ -116,6 +133,8 @@ fn main() {
             commands::get_status,
             commands::set_enabled,
             commands::set_present,
+            commands::get_autostart,
+            commands::set_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Auto-Mute on Walkaway");
@@ -135,15 +154,23 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     let mut builder = TrayIconBuilder::new()
         .tooltip("Auto-Mute on Walkaway")
         .menu(&menu)
+        // Keep the menu on right-click only; a left click restores the window,
+        // the behaviour Windows users expect from a tray app.
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quit" => app.exit(0),
-            "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
+            "show" => show_main_window(app),
             _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
         });
 
     if let Some(icon) = app.default_window_icon() {
@@ -152,4 +179,13 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
 
     builder.build(app)?;
     Ok(())
+}
+
+/// Bring the main window to the foreground (shared by the tray menu and a
+/// left click on the tray icon).
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }

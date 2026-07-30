@@ -24,7 +24,9 @@ is completed to production quality — with tests — before the next is started
 | Microphone    | Infrastructure | ✅ Done (Windows WASAPI · Linux PulseAudio/PipeWire) |
 | Clock         | Infrastructure | ✅ Done      |
 | Notification  | Infrastructure | ✅ Done (Tauri notification plugin) |
-| Tray          | Infrastructure | ✅ Done      |
+| Tray          | Infrastructure | ✅ Done (left-click show · right-click menu) |
+| Auto-start    | Infrastructure | ✅ Done (start on login, opt-in) |
+| Crash logging | Infrastructure | ✅ Done (panics captured to `crash.log`) |
 | Settings UI   | UI             | ✅ Done (React) |
 | Tauri wiring  | UI / OS        | ✅ Done      |
 | Camera        | Infrastructure | ✅ Done (Windows SetupAPI · Linux `uvcvideo` — see below) |
@@ -235,7 +237,25 @@ npm run tauri build         # produce a release bundle
 ```
 
 Config is stored at the OS app-config dir (e.g. `~/.config/com.automute.walkaway/config.json`)
-and logs at the app-log dir; neither is committed.
+and logs at the app-log dir; neither is committed. Uncaught panics are written to
+`crash.log` beside the app log, so a windowed release build still leaves a trace.
+
+### Windows beta
+
+The first Windows beta ships the native WASAPI/SetupAPI adapters, a per-user
+NSIS installer, an opt-in *start on login* toggle, a system-tray icon, and crash
+logging. See **[docs/WINDOWS_BETA.md](docs/WINDOWS_BETA.md)** for building the
+installer, installing, first-run setup, and troubleshooting. In short:
+
+```powershell
+npm install
+npm run tauri build
+# installer: src-tauri\target\release\bundle\nsis\*-setup.exe
+```
+
+Camera control toggles the device node and needs administrator rights; run the
+app elevated to use `auto_camera_off`. Microphone mute does not require it, and
+the app degrades safely when a privilege is missing.
 
 ---
 

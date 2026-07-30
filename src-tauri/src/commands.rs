@@ -5,7 +5,8 @@
 //! the tested `amow_application` layer.
 
 use amow_config::AppConfig;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_autostart::ManagerExt;
 
 use crate::status::Status;
 use crate::AppState;
@@ -44,4 +45,24 @@ pub fn set_enabled(enabled: bool, state: State<AppState>) {
 #[tauri::command]
 pub fn set_present(present: bool, state: State<AppState>) {
     state.supervisor.set_face(present);
+}
+
+/// Whether the app is registered to start automatically on login. The OS (the
+/// registry on Windows) is the source of truth, so this preference persists
+/// across restarts without any config file of our own.
+#[tauri::command]
+pub fn get_autostart(app: AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+/// Enable or disable starting the app automatically on login.
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    }
+    .map_err(|e| e.to_string())
 }
