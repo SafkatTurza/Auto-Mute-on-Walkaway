@@ -21,6 +21,7 @@ use std::env;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
@@ -42,6 +43,11 @@ const ENV_DISABLE: &str = "AMOW_PRESENCE_DISABLE";
 pub struct PresenceBridge {
     child: Option<Child>,
     threads: Vec<JoinHandle<()>>,
+    /// True while the sidecar process is running and streaming samples — i.e.
+    /// presence is being driven automatically by the webcam rather than the
+    /// manual toggle. Set when the process starts; cleared when its stdout
+    /// closes (the process exited, crashed, or was killed).
+    active: Arc<AtomicBool>,
 }
 
 impl PresenceBridge {
@@ -54,6 +60,7 @@ impl PresenceBridge {
         let mut bridge = Self {
             child: None,
             threads: Vec::new(),
+            active: Arc::new(AtomicBool::new(false)),
         };
 
         if disabled() {
@@ -92,6 +99,7 @@ impl PresenceBridge {
         // presence report, push the mapped face sample. Malformed lines are
         // dropped by the parser, so one bad line never breaks the pipeline.
         if let Some(stdout) = child.stdout.take() {
+            let active = self.active.clone();
             self.threads.push(thread::spawn(move || {
                 let reader = BufReader::new(stdout);
                 for line in reader.lines() {
@@ -100,6 +108,10 @@ impl PresenceBridge {
                         sink.set(report.face_present());
                     }
                 }
+                // stdout closed: the sidecar exited (or crashed/was killed), so
+                // presence is no longer coming from the webcam. Fall back to the
+                // manual toggle as the live source.
+                active.store(false, Ordering::SeqCst);
             }));
         }
 
@@ -119,7 +131,17 @@ impl PresenceBridge {
         }
 
         self.child = Some(child);
+        // The process is up and its reader is draining stdout: presence is now
+        // automatic. The reader thread clears this if the process later dies.
+        self.active.store(true, Ordering::SeqCst);
         Ok(())
+    }
+
+    /// Whether presence is currently being driven automatically by the webcam
+    /// sidecar (as opposed to the manual toggle). False when the sidecar is
+    /// disabled, failed to start, or has since exited.
+    pub fn is_active(&self) -> bool {
+        self.active.load(Ordering::SeqCst)
     }
 }
 

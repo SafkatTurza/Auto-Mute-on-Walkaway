@@ -45,6 +45,12 @@ body {
   font-size: 12px;
 }
 
+/* A card whose function is currently redundant (e.g. the manual presence toggle
+   while the webcam is driving presence automatically). Kept visible but muted. */
+.card-dim {
+  opacity: 0.6;
+}
+
 /* Inline caution shown under a toggle whose action the app can't currently
    honour (e.g. camera control without administrator rights). */
 .warn-inline {

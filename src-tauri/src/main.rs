@@ -41,7 +41,8 @@ pub struct AppState {
     pub config_path: PathBuf,
     pub config: Mutex<AppConfig>,
     /// Kept alive for the app's lifetime; dropping it stops the webcam sidecar.
-    _presence_bridge: PresenceBridge,
+    /// Also queried for whether presence is currently automatic (sidecar live).
+    pub presence_bridge: PresenceBridge,
 }
 
 fn main() {
@@ -152,7 +153,7 @@ fn main() {
                 status: shared_status,
                 config_path,
                 config: Mutex::new(config),
-                _presence_bridge: presence_bridge,
+                presence_bridge,
             });
 
             install_tray(app)?;
@@ -163,6 +164,7 @@ fn main() {
             commands::save_config,
             commands::get_status,
             commands::get_camera_control_available,
+            commands::get_presence_automatic,
             commands::set_enabled,
             commands::set_present,
             commands::get_autostart,

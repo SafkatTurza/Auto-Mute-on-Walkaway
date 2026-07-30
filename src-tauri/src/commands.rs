@@ -43,6 +43,14 @@ pub fn get_camera_control_available() -> bool {
     amow_adapters::camera_control_available()
 }
 
+/// Whether presence is currently being driven automatically by the webcam
+/// sidecar (true) or is falling back to the manual toggle (false). Lets the UI
+/// show the live presence source instead of leaving the user guessing.
+#[tauri::command]
+pub fn get_presence_automatic(state: State<AppState>) -> bool {
+    state.presence_bridge.is_active()
+}
+
 /// Turn walkaway protection on or off (the user's master switch).
 #[tauri::command]
 pub fn set_enabled(enabled: bool, state: State<AppState>) {

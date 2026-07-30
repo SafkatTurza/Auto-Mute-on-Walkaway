@@ -15,6 +15,9 @@ export default function App() {
   // Windows). null = not yet known; used to warn before enabling camera control
   // the app couldn't honour. Elevation is fixed for the process lifetime.
   const [cameraControl, setCameraControl] = useState<boolean | null>(null);
+  // Whether presence is currently automatic (webcam sidecar live) vs the manual
+  // toggle. Polled, since the sidecar can stop at runtime. null = not yet known.
+  const [presenceAuto, setPresenceAuto] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -27,6 +30,7 @@ export default function App() {
         setEnabled(s.enabled);
       })
       .catch(() => {});
+    api.getPresenceAutomatic().then(setPresenceAuto).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -122,6 +126,16 @@ export default function App() {
             <dd>{status?.presence ?? "—"}</dd>
           </div>
           <div>
+            <dt>Source</dt>
+            <dd className={presenceAuto ? "live-good" : "live-warn"}>
+              {presenceAuto === null
+                ? "—"
+                : presenceAuto
+                  ? "📷 Webcam (auto)"
+                  : "✋ Manual"}
+            </dd>
+          </div>
+          <div>
             <dt>Protection</dt>
             <dd>{status?.enabled ? "on" : "off"}</dd>
           </div>
@@ -174,12 +188,21 @@ export default function App() {
         </div>
       </section>
 
-      <section className="card">
+      <section className={`card ${presenceAuto ? "card-dim" : ""}`}>
         <h2>Simulate presence</h2>
-        <p className="muted small">
-          Presence normally comes from the webcam sidecar. This manual toggle is
-          a fallback for when it isn't running; it drives the real logic too.
-        </p>
+        {presenceAuto ? (
+          <p className="muted small">
+            ✅ The webcam is detecting presence automatically — this manual
+            toggle isn't needed right now. It's here as a fallback for when the
+            webcam sidecar isn't running.
+          </p>
+        ) : (
+          <p className="muted small">
+            The webcam sidecar isn't running, so presence is manual. Start the
+            app with <code>run-with-presence.ps1</code> for automatic detection.
+            This toggle drives the real logic too.
+          </p>
+        )}
         <div className="row">
           <button className={present ? "btn" : "btn on"} onClick={togglePresent}>
             {present ? "At desk" : "Away"}

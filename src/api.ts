@@ -15,6 +15,10 @@ export const getStatus = (): Promise<Status> => invoke("get_status");
 export const getCameraControlAvailable = (): Promise<boolean> =>
   invoke("get_camera_control_available");
 
+/** Whether presence is driven automatically by the webcam sidecar (vs manual). */
+export const getPresenceAutomatic = (): Promise<boolean> =>
+  invoke("get_presence_automatic");
+
 export const setEnabled = (enabled: boolean): Promise<void> =>
   invoke("set_enabled", { enabled });
 

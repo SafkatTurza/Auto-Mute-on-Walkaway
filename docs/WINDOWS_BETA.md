@@ -87,6 +87,10 @@ a reproducible build.
      automatically.
    - Otherwise use **Simulate presence → Away** to trigger a walkaway. This
      drives the *real* logic (it mutes your actual mic).
+   - The status panel shows the live **Source** — *📷 Webcam (auto)* when the
+     sidecar is running, or *✋ Manual* when it isn't — so you can tell at a
+     glance which is driving presence. The manual card dims itself while the
+     webcam is active.
 
 > **Tip — one-click launch with presence.** Rather than setting the
 > `AMOW_PRESENCE_*` variables by hand, run the bundled helper from the repo
