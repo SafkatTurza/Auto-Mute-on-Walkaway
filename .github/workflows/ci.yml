@@ -1,0 +1,94 @@
+name: CI
+
+# Runs on every push and pull request. Three jobs:
+#   - logic-crates : fmt + clippy + tests for the pure-logic Cargo workspace,
+#                    plus a cross-target clippy of the Windows adapters (so the
+#                    `#[cfg(windows)]` device code is checked from Linux).
+#   - frontend     : TypeScript + Vite build of the React UI.
+#   - windows-app  : compiles the Tauri desktop crate (`src-tauri`) on Windows,
+#                    which cannot be built on Linux (needs WebView2). This is the
+#                    job that catches composition-root wiring/compile errors.
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  logic-crates:
+    name: Logic crates (fmt · clippy · test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test (workspace)
+        run: cargo test --workspace
+
+      - name: Clippy Windows adapters (cross-target)
+        run: cargo clippy -p amow-adapters --all-targets --target x86_64-pc-windows-gnu -- -D warnings
+
+  frontend:
+    name: Frontend (tsc · vite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  windows-app:
+    name: Windows app build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            src-tauri
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `--no-bundle` compiles the full app (frontend + Rust, via the config's
+      # beforeBuildCommand) without the slow NSIS/MSI packaging step, so every
+      # push is checked quickly. Drop the flag (and add an upload-artifact step)
+      # to have CI produce a downloadable installer.
+      - name: Build Tauri app (compile check)
+        run: npm run tauri build -- --no-bundle
