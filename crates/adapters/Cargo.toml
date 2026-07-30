@@ -1,0 +1,9 @@
+[package]
+name = "amow-adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+amow-application = { workspace = true }

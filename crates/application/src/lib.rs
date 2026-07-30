@@ -91,6 +91,20 @@ where
         self.protection.is_some()
     }
 
+    /// Apply new behaviour policy at runtime (e.g. the user changed a toggle in
+    /// Settings). Takes effect on the next reconcile; an in-progress protection
+    /// episode is left intact so a live mute is not disturbed mid-change.
+    pub fn set_behavior(&mut self, behavior: BehaviorConfig) {
+        self.behavior = behavior;
+    }
+
+    /// Replace the presence-debounce tuning. This resets presence tracking to
+    /// `Present` (the safe default), so it should be paired with a fresh sample
+    /// stream; it is intended for applying changed grace periods from Settings.
+    pub fn set_presence_config(&mut self, presence_config: PresenceConfig) {
+        self.presence = PresenceTracker::new(presence_config);
+    }
+
     /// Feed one raw face-detection sample. Times it with the injected clock,
     /// updates presence, and reconciles device protection.
     pub fn on_face_sample(&mut self, face_present: bool) {

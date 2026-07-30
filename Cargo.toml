@@ -12,7 +12,12 @@ members = [
     "crates/logger",
     "crates/eventbus",
     "crates/application",
+    "crates/adapters",
 ]
+# The Tauri application crate carries the GUI/webview toolchain (webkit2gtk on
+# Linux). It is deliberately kept out of the workspace so `cargo test` on the
+# logic crates never requires those system libraries. Build it from src-tauri/.
+exclude = ["src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,6 +33,7 @@ amow-config = { path = "crates/config" }
 amow-logger = { path = "crates/logger" }
 amow-eventbus = { path = "crates/eventbus" }
 amow-application = { path = "crates/application" }
+amow-adapters = { path = "crates/adapters" }
 
 [profile.release]
 opt-level = "z"

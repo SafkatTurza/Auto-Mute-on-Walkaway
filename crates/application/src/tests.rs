@@ -291,3 +291,16 @@ fn notifies_on_action_when_enabled() {
         "one notification per protected device"
     );
 }
+
+#[test]
+fn set_behavior_applies_to_next_reconcile() {
+    let behavior = BehaviorConfig {
+        auto_mute: false,
+        ..BehaviorConfig::default()
+    };
+    let (mut c, h) = build(behavior, false, true);
+    // Re-enable auto_mute at runtime; the next walkaway must now mute.
+    c.set_behavior(BehaviorConfig::default());
+    walk_away(&mut c, &h);
+    assert!(h.mic.value(), "runtime behavior change should take effect");
+}

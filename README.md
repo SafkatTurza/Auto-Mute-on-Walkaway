@@ -22,19 +22,36 @@ is completed to production quality — with tests — before the next is started
 | Presence      | Core (logic)   | ✅ Done      |
 | Meeting       | Core (logic)   | ✅ Done      |
 | Orchestration | Application    | ✅ Done      |
-| Microphone    | Infrastructure | ⏳ Next      |
-| Camera        | Infrastructure | ⏳ Next      |
+| Microphone    | Infrastructure | ✅ Done (PulseAudio / PipeWire via `pactl`) |
+| Clock         | Infrastructure | ✅ Done      |
+| Notification  | Infrastructure | ✅ Done (Tauri notification plugin) |
+| Tray          | Infrastructure | ✅ Done      |
+| Settings UI   | UI             | ✅ Done (React) |
+| Tauri wiring  | UI / OS        | ✅ Done      |
+| Camera        | Infrastructure | ⚠️ Platform-limited (see below) |
 | Presence capture (MediaPipe) | Infrastructure | ⏳ Next |
-| Notification  | Infrastructure | ⏳ Planned   |
-| Tray          | Infrastructure | ⏳ Planned   |
-| Settings UI   | UI             | ⏳ Planned   |
-| Tauri wiring  | UI / OS        | ⏳ Planned   |
+| Meeting detection | Infrastructure | ⏳ Next  |
 
 The **entire walkaway decision logic — presence debouncing, meeting gating,
-auto-mute, auto-camera-off, and auto-restore — is implemented and unit-tested**
-today. What remains is the OS-specific plumbing (device adapters, the webcam
-capture pipeline, tray, and the Tauri/React shell) that connects that logic to
-the machine.
+auto-mute, auto-camera-off, and auto-restore — is implemented and unit-tested**,
+and it is now wired end-to-end into a Tauri desktop app: a background supervisor
+owns the controller, the microphone is really muted through `pactl`, actions
+raise desktop notifications, a tray gives show/quit, and a React Settings panel
+edits the persisted config live.
+
+**What still feeds the logic manually.** The presence detector (webcam +
+MediaPipe) and the meeting detector are the remaining modules. Until they land,
+the Settings window exposes two manual inputs — *"In a meeting"* and *"Away"* —
+that drive the **real** protection path (they mute your actual mic). Those
+detectors will push into the exact same sampling channel, so no application code
+changes when they arrive.
+
+**Camera is platform-limited by design, not stubbed.** Unlike audio, Linux has
+no portable way to force another app's camera off — the capture device is owned
+by the conferencing app. The `UnsupportedCamera` adapter therefore reports the
+capability as unavailable, and the controller (which already tolerates a failing
+device port) simply leaves the camera alone while still muting the mic. A future
+per-platform backend can replace that adapter without touching the core.
 
 ---
 
@@ -57,7 +74,14 @@ crates/
   logger/        Infrastructure: leveled logger with pluggable sinks
   eventbus/      Application: synchronous in-process pub/sub
   application/   Use cases: WalkawayController + ports (device interfaces)
+  adapters/      Infrastructure: OS adapters implementing the ports
+                 (SystemClock, PulseMicrophone, UnsupportedCamera)
+src-tauri/       UI/OS: the Tauri app that composes the above and hosts the UI
+src/             UI: the React + TypeScript Settings front end
 ```
+
+`src-tauri/` is deliberately **excluded from the Cargo workspace** so
+`cargo test` on the logic crates never needs the GUI toolchain (webkit2gtk).
 
 Key design choices that keep this honest and testable:
 
@@ -123,8 +147,20 @@ cargo test --workspace          # run all unit tests
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-The Tauri desktop shell (once added) additionally needs the platform webview
-dependencies — see the Tauri prerequisites for your OS.
+### Running the desktop app
+
+The Tauri shell additionally needs Node.js and the platform webview
+dependencies (on Linux: `webkit2gtk-4.1`, `gtk3`, `libsoup-3` — see the Tauri
+v2 prerequisites for your OS), plus `pactl` for microphone control.
+
+```bash
+npm install                 # front-end dependencies
+npm run tauri dev           # run the app (Vite + Tauri)
+npm run tauri build         # produce a release bundle
+```
+
+Config is stored at the OS app-config dir (e.g. `~/.config/com.automute.walkaway/config.json`)
+and logs at the app-log dir; neither is committed.
 
 ---
 
