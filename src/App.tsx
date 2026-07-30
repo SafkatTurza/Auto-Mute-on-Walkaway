@@ -8,13 +8,20 @@ const LOG_LEVELS: LogLevel[] = ["error", "warn", "info", "debug"];
 export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
-  const [meeting, setMeeting] = useState(false);
+  const [enabled, setEnabled] = useState(false);
   const [present, setPresent] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   const refreshStatus = useCallback(() => {
-    api.getStatus().then(setStatus).catch(() => {});
+    api
+      .getStatus()
+      .then((s) => {
+        setStatus(s);
+        // Keep the toggle in sync with the backend's source of truth.
+        setEnabled(s.enabled);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -57,10 +64,10 @@ export default function App() {
     }
   };
 
-  const toggleMeeting = async () => {
-    const next = !meeting;
-    setMeeting(next);
-    await api.setMeetingActive(next);
+  const toggleEnabled = async () => {
+    const next = !enabled;
+    setEnabled(next);
+    await api.setEnabled(next);
     refreshStatus();
   };
 
@@ -90,7 +97,7 @@ export default function App() {
 
       <section className="card status">
         <div className={`pill ${status?.protecting ? "pill-on" : ""}`}>
-          {status?.protecting ? "Protecting" : "Idle"}
+          {status?.protecting ? "Protecting" : status?.enabled ? "Watching" : "Off"}
         </div>
         <dl className="statgrid">
           <div>
@@ -98,22 +105,35 @@ export default function App() {
             <dd>{status?.presence ?? "—"}</dd>
           </div>
           <div>
-            <dt>Meeting</dt>
-            <dd>{status?.meeting ?? "—"}</dd>
+            <dt>Protection</dt>
+            <dd>{status?.enabled ? "on" : "off"}</dd>
           </div>
         </dl>
       </section>
 
       <section className="card">
-        <h2>Simulate</h2>
+        <h2>Protection</h2>
         <p className="muted small">
-          Manual inputs until the webcam and meeting detectors land. Toggling
-          these drives the real protection logic.
+          The master switch. While on, stepping away for the away-grace period
+          mutes your mic and disables the camera; returning restores them.
         </p>
         <div className="row">
-          <button className={meeting ? "btn on" : "btn"} onClick={toggleMeeting}>
-            {meeting ? "In a meeting" : "No meeting"}
+          <button
+            className={enabled ? "btn on" : "btn"}
+            onClick={toggleEnabled}
+          >
+            {enabled ? "Protection on" : "Protection off"}
           </button>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Simulate presence</h2>
+        <p className="muted small">
+          Presence normally comes from the webcam sidecar. This manual toggle is
+          a fallback for when it isn't running; it drives the real logic too.
+        </p>
+        <div className="row">
           <button className={present ? "btn" : "btn on"} onClick={togglePresent}>
             {present ? "At desk" : "Away"}
           </button>

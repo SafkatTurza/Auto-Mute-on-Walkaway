@@ -34,10 +34,10 @@ pub fn get_status(state: State<AppState>) -> Status {
     state.status.snapshot()
 }
 
-/// Report whether a meeting is active (manual toggle today; detector later).
+/// Turn walkaway protection on or off (the user's master switch).
 #[tauri::command]
-pub fn set_meeting_active(active: bool, state: State<AppState>) {
-    state.supervisor.set_meeting(active);
+pub fn set_enabled(enabled: bool, state: State<AppState>) {
+    state.supervisor.set_enabled(enabled);
 }
 
 /// Report whether the user is present (manual toggle today; detector later).

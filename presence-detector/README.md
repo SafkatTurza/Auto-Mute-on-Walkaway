@@ -14,7 +14,7 @@ By design, and to keep it free of business logic:
 
 - **No device control.** It never mutes a microphone or disables a camera. It
   only reports presence; the host application owns every action.
-- **No policy.** It does not know what a "meeting" is, or whether muting is
+- **No policy.** It does not know whether protection is on, or whether muting is
   enabled. It just classifies presence.
 - **No network.** All detection runs on-device. No frames, images, audio, or
   personal data ever leave the machine — nothing is stored or uploaded.

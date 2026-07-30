@@ -114,7 +114,7 @@ fn main() {
             commands::get_config,
             commands::save_config,
             commands::get_status,
-            commands::set_meeting_active,
+            commands::set_enabled,
             commands::set_present,
         ])
         .run(tauri::generate_context!())

@@ -11,8 +11,8 @@ export const saveConfig = (newConfig: AppConfig): Promise<void> =>
 
 export const getStatus = (): Promise<Status> => invoke("get_status");
 
-export const setMeetingActive = (active: boolean): Promise<void> =>
-  invoke("set_meeting_active", { active });
+export const setEnabled = (enabled: boolean): Promise<void> =>
+  invoke("set_enabled", { enabled });
 
 export const setPresent = (present: boolean): Promise<void> =>
   invoke("set_present", { present });

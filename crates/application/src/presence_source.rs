@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn rejects_a_different_message_type() {
-        let l = r#"{"type":"meeting","state":"present","at_ms":1}"#;
+        let l = r#"{"type":"heartbeat","state":"present","at_ms":1}"#;
         assert!(parse_line(l).is_none());
     }
 

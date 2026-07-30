@@ -1,8 +1,8 @@
 use serde::Serialize;
 
-use crate::{MeetingState, Millis, PresenceState};
+use crate::{Millis, PresenceState};
 
-/// A device the application can automatically control during a meeting.
+/// A device the application can automatically control when the user walks away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DeviceKind {
@@ -21,8 +21,6 @@ pub enum DeviceKind {
 pub enum DomainEvent {
     /// The user's presence at the desk changed.
     PresenceChanged { state: PresenceState, at: Millis },
-    /// A meeting started or ended.
-    MeetingChanged { state: MeetingState, at: Millis },
     /// A device was automatically muted/disabled by the app.
     DeviceProtected {
         device: DeviceKind,

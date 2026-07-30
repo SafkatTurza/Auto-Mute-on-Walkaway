@@ -1,6 +1,6 @@
 [package]
 name = "amow-application"
-description = "Use cases: walkaway orchestration wiring presence & meeting to devices."
+description = "Use cases: walkaway orchestration wiring presence to devices."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

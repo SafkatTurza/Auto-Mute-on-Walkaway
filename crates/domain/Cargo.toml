@@ -1,6 +1,6 @@
 [package]
 name = "amow-domain"
-description = "Core domain: presence & meeting state machines, events, value objects."
+description = "Core domain: presence state machine, events, value objects."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

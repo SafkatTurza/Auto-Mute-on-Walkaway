@@ -29,6 +29,6 @@ export interface AppConfig {
 
 export interface Status {
   presence: "present" | "away";
-  meeting: "active" | "idle";
+  enabled: boolean;
   protecting: boolean;
 }

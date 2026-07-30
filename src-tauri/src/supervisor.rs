@@ -6,10 +6,10 @@
 //! rest of the app talks to it only through a channel, keeping all mutation on
 //! one thread with no locking around the controller itself.
 //!
-//! Presence and meeting inputs are held as plain values updated by messages.
-//! Today those messages come from the UI's manual toggles; when the webcam
-//! presence detector and meeting monitor land, they will push into the very
-//! same channel — the sampling model does not change.
+//! Presence samples and the enable switch are held as plain values updated by
+//! messages. Presence comes from the webcam sidecar (or the UI's manual toggle
+//! as a fallback); the enable switch is the user's master on/off. Both push
+//! into the very same channel — the sampling model does not change.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
@@ -31,7 +31,7 @@ type Controller =
 
 /// Control messages sent to the supervisor thread.
 enum Msg {
-    SetMeeting(bool),
+    SetEnabled(bool),
     SetFace(bool),
     UpdateConfig(Box<AppConfig>),
     Shutdown,
@@ -63,9 +63,9 @@ impl Supervisor {
         }
     }
 
-    /// Report whether a meeting is currently active.
-    pub fn set_meeting(&self, active: bool) {
-        let _ = self.tx.send(Msg::SetMeeting(active));
+    /// Turn walkaway protection on or off (the user's master switch).
+    pub fn set_enabled(&self, enabled: bool) {
+        let _ = self.tx.send(Msg::SetEnabled(enabled));
     }
 
     /// Report whether the user's face is currently present.
@@ -140,15 +140,23 @@ fn run(
     let mut controller = build_controller(&config, bus, notifier);
     let mut interval = sample_interval(&config);
 
-    // Initial inputs match the trackers' initial state: present, no meeting.
+    // Initial inputs match the controller's initial state: present, protection
+    // off until the user enables it.
     let mut face_present = true;
-    let mut meeting_active = false;
+    let mut enabled = false;
 
     logger.info("supervisor started");
 
     loop {
         match rx.recv_timeout(interval) {
-            Ok(Msg::SetMeeting(active)) => meeting_active = active,
+            Ok(Msg::SetEnabled(on)) => {
+                enabled = on;
+                logger.info(if on {
+                    "protection enabled"
+                } else {
+                    "protection disabled"
+                });
+            }
             Ok(Msg::SetFace(present)) => face_present = present,
             Ok(Msg::UpdateConfig(new_config)) => {
                 config = *new_config;
@@ -165,10 +173,10 @@ fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
 
-        // Feed the current inputs through the domain each cycle. `observe`
-        // reports only edges, so steady state is cheap; the debounce timing is
-        // driven by the real monotonic clock inside the controller.
-        controller.on_meeting_sample(meeting_active);
+        // Feed the current inputs through the domain each cycle. Both calls are
+        // no-ops in steady state (edge-detected), so idle cost stays low; the
+        // debounce timing is driven by the real monotonic clock in the controller.
+        controller.set_enabled(enabled);
         controller.on_face_sample(face_present);
 
         status.update(&controller);

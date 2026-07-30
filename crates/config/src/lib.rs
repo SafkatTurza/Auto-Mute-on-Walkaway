@@ -36,9 +36,9 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BehaviorConfig {
-    /// Mute the microphone when the user walks away during a meeting.
+    /// Mute the microphone when the user walks away (while protection is on).
     pub auto_mute: bool,
-    /// Disable the camera when the user walks away during a meeting.
+    /// Disable the camera when the user walks away (while protection is on).
     pub auto_camera_off: bool,
     /// Restore mic/camera to their prior state when the user returns.
     pub auto_restore: bool,

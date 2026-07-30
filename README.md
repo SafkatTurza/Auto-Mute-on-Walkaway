@@ -1,8 +1,8 @@
 # Auto-Mute on Walkaway
 
-A privacy-first desktop app that notices when you step away from your desk
-during a meeting and automatically **mutes your microphone** and **disables
-your camera**, restoring both when you return.
+A privacy-first desktop app that notices when you step away from your desk and
+automatically **mutes your microphone** and **disables your camera**, restoring
+both when you return. You switch protection on, and it watches for you.
 
 Everything runs locally. No camera frames, audio, images, or user data ever
 leave the machine.
@@ -20,7 +20,6 @@ is completed to production quality — with tests — before the next is started
 | Logger        | Infrastructure | ✅ Done      |
 | Event Bus     | Application    | ✅ Done      |
 | Presence      | Core (logic)   | ✅ Done      |
-| Meeting       | Core (logic)   | ✅ Done      |
 | Orchestration | Application    | ✅ Done      |
 | Microphone    | Infrastructure | ✅ Done (PulseAudio / PipeWire via `pactl`) |
 | Clock         | Infrastructure | ✅ Done      |
@@ -31,14 +30,13 @@ is completed to production quality — with tests — before the next is started
 | Camera        | Infrastructure | ✅ Done (Linux, `uvcvideo` bind/unbind — see below) |
 | Presence capture (MediaPipe) | Infrastructure | ✅ Done (Python sidecar, see `presence-detector/`) |
 | Host bridge (sidecar → Event Bus) | UI / OS | ✅ Done (spawns the sidecar, feeds presence in) |
-| Meeting detection | Infrastructure | ⏳ Next  |
 
-The **entire walkaway decision logic — presence debouncing, meeting gating,
-auto-mute, auto-camera-off, and auto-restore — is implemented and unit-tested**,
-and it is now wired end-to-end into a Tauri desktop app: a background supervisor
-owns the controller, the microphone is really muted through `pactl`, actions
-raise desktop notifications, a tray gives show/quit, and a React Settings panel
-edits the persisted config live.
+The **entire walkaway decision logic — presence debouncing, the protection
+master switch, auto-mute, auto-camera-off, and auto-restore — is implemented and
+unit-tested**, and it is now wired end-to-end into a Tauri desktop app: a
+background supervisor owns the controller, the microphone is really muted through
+`pactl`, actions raise desktop notifications, a tray gives show/quit, and a React
+Settings panel edits the persisted config live.
 
 **Presence detection is implemented as a local sidecar, now wired end-to-end.**
 The webcam + MediaPipe presence detector lives in
@@ -58,8 +56,9 @@ pass straight through and the **single** configurable debounce stays in the core
 (`presence.away_grace_ms` / `return_grace_ms`) — never duplicated across the two
 processes. Only presence phases cross the process boundary; no camera frame ever
 does. If the sidecar cannot start (no Python, no camera), the app logs it and
-falls back to the manual *"Away"* toggle. Meeting state still comes from the
-manual *"In a meeting"* toggle until the meeting detector lands; both toggles
+falls back to the manual *"Away"* toggle. Protection itself is a single master
+switch the user turns on: while it is on, a walkaway mutes the mic and disables
+the camera; turning it off (or returning) restores them. The manual toggles
 drive the **real** protection path (they mute your actual mic).
 
 **Camera control is real, at the OS level.** The `LinuxUvcCamera` adapter
@@ -93,7 +92,7 @@ future `src-tauri` application crate:
 
 ```
 crates/
-  domain/        Core: presence & meeting state machines, events, value objects
+  domain/        Core: presence state machine, events, value objects
   config/        Infrastructure: typed JSON config with defaults & validation
   logger/        Infrastructure: leveled logger with pluggable sinks
   eventbus/      Application: synchronous in-process pub/sub
@@ -129,18 +128,20 @@ Key design choices that keep this honest and testable:
 
 ### How the walkaway logic works
 
-1. A presence sample (`face_present: bool`) arrives each tick — from the webcam
+1. The user turns **protection on** (the master switch). Nothing is ever touched
+   while it is off.
+2. A presence sample (`face_present: bool`) arrives each tick — from the webcam
    sidecar via the host bridge, or from the manual toggle. `PresenceTracker`
    debounces it — a face must be *continuously* absent for a grace period before
    the user is declared `Away`, and continuously present before `Present`. This
    rejects single dropped frames.
-2. A meeting sample (`active: bool`) updates `MeetingTracker`.
-3. `WalkawayController` reconciles: it protects devices only while a meeting is
-   **active and** the user is **away**. On engage it mutes the mic / disables the
+3. `WalkawayController` reconciles: it protects devices only while protection is
+   **on and** the user is **away**. On engage it mutes the mic / disables the
    camera, remembering the prior state — but only for devices it actually
    changed, so a user's own manual mute is never disturbed.
-4. On return, meeting end, or any exit from the protected condition, it restores
-   exactly what it changed (when `auto_restore` is enabled).
+4. On return, when protection is switched off, or any exit from the protected
+   condition, it restores exactly what it changed (when `auto_restore` is
+   enabled).
 
 ---
 

@@ -3,26 +3,26 @@
 use std::sync::{Arc, Mutex};
 
 use amow_application::{Camera, Clock, Microphone, Notifier, WalkawayController};
-use amow_domain::{MeetingState, PresenceState};
+use amow_domain::PresenceState;
 use serde::Serialize;
 
-/// What the front end renders: current presence, meeting, and protection state.
+/// What the front end renders: current presence, enable, and protection state.
 #[derive(Clone, Serialize)]
 pub struct Status {
     /// `"present"` or `"away"`.
     pub presence: &'static str,
-    /// `"active"` or `"idle"`.
-    pub meeting: &'static str,
+    /// Whether walkaway protection is switched on.
+    pub enabled: bool,
     /// Whether the app is currently holding devices protected.
     pub protecting: bool,
 }
 
 impl Default for Status {
     fn default() -> Self {
-        // Matches the trackers' initial state: present, not in a meeting.
+        // Matches the controller's initial state: present, protection off.
         Self {
             presence: "present",
-            meeting: "idle",
+            enabled: false,
             protecting: false,
         }
     }
@@ -47,10 +47,7 @@ impl SharedStatus {
                 PresenceState::Present => "present",
                 PresenceState::Away => "away",
             },
-            meeting: match controller.meeting_state() {
-                MeetingState::Active => "active",
-                MeetingState::Idle => "idle",
-            },
+            enabled: controller.is_enabled(),
             protecting: controller.is_protecting(),
         };
         *self.0.lock().expect("status mutex poisoned") = snapshot;

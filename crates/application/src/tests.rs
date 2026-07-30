@@ -155,10 +155,10 @@ fn build(
     )
 }
 
-/// Drive a controller from "in meeting, present" to "away" past the grace.
+/// Drive a controller from "protection enabled, present" to "away" past grace.
 fn walk_away(c: &mut TestController, h: &Handles) {
     h.at(0);
-    c.on_meeting_sample(true);
+    c.set_enabled(true);
     c.on_face_sample(false);
     h.at(1_000);
     c.on_face_sample(false); // presence -> Away, triggers protection
@@ -167,7 +167,7 @@ fn walk_away(c: &mut TestController, h: &Handles) {
 // --- Tests --------------------------------------------------------------------
 
 #[test]
-fn mutes_and_disables_on_walkaway_during_meeting() {
+fn mutes_and_disables_on_walkaway_when_enabled() {
     let (mut c, h) = build(BehaviorConfig::default(), false, true);
     walk_away(&mut c, &h);
     assert!(h.mic.value(), "mic should be muted");
@@ -176,8 +176,9 @@ fn mutes_and_disables_on_walkaway_during_meeting() {
 }
 
 #[test]
-fn does_nothing_when_no_meeting() {
+fn does_nothing_when_protection_disabled() {
     let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    // Never enabled: walking away must not touch any device.
     h.at(0);
     c.on_face_sample(false);
     h.at(1_000);
@@ -185,6 +186,22 @@ fn does_nothing_when_no_meeting() {
     assert!(!c.is_protecting());
     assert!(!h.mic.value());
     assert!(h.cam.value());
+}
+
+#[test]
+fn enabling_protection_while_already_away_engages_immediately() {
+    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    // User is away first (grace elapsed), protection still off: nothing happens.
+    h.at(0);
+    c.on_face_sample(false);
+    h.at(1_000);
+    c.on_face_sample(false);
+    assert!(!c.is_protecting(), "away but disabled: no protection");
+    // Now enable while already away — it must engage at once.
+    c.set_enabled(true);
+    assert!(c.is_protecting());
+    assert!(h.mic.value(), "mic muted the moment protection is enabled");
+    assert!(!h.cam.value(), "camera disabled the moment it is enabled");
 }
 
 #[test]
@@ -213,14 +230,14 @@ fn does_not_touch_a_mic_the_user_already_muted() {
 }
 
 #[test]
-fn restores_when_meeting_ends_while_away() {
+fn restores_when_protection_disabled_while_away() {
     let (mut c, h) = build(BehaviorConfig::default(), false, true);
     walk_away(&mut c, &h);
     h.at(1_000);
-    c.on_meeting_sample(false);
+    c.set_enabled(false);
     assert!(!c.is_protecting());
-    assert!(!h.mic.value(), "mic restored on meeting end");
-    assert!(h.cam.value(), "camera restored on meeting end");
+    assert!(!h.mic.value(), "mic restored when protection turned off");
+    assert!(h.cam.value(), "camera restored when protection turned off");
 }
 
 #[test]
@@ -272,13 +289,12 @@ fn emits_expected_event_sequence() {
         .events()
         .iter()
         .map(|e| match e {
-            DomainEvent::MeetingChanged { .. } => "meeting",
             DomainEvent::PresenceChanged { .. } => "presence",
             DomainEvent::DeviceProtected { .. } => "protected",
             DomainEvent::DeviceRestored { .. } => "restored",
         })
         .collect();
-    assert_eq!(kinds, vec!["meeting", "presence", "protected", "protected"]);
+    assert_eq!(kinds, vec!["presence", "protected", "protected"]);
 }
 
 #[test]
@@ -330,9 +346,9 @@ fn presence_line(state: &str, at_ms: i64) -> String {
 fn full_flow_from_sidecar_lines_mutes_then_restores() {
     let (mut c, h) = build(BehaviorConfig::default(), false, true);
 
-    // In a meeting, user confirmed present: no action yet.
+    // Protection enabled, user confirmed present: no action yet.
     h.at(0);
-    c.on_meeting_sample(true);
+    c.set_enabled(true);
     feed_line(&mut c, &presence_line("present", 0));
     assert!(!c.is_protecting(), "present user must not be protected");
 
@@ -366,7 +382,6 @@ fn full_flow_from_sidecar_lines_mutes_then_restores() {
         .events()
         .iter()
         .map(|e| match e {
-            DomainEvent::MeetingChanged { .. } => "meeting",
             DomainEvent::PresenceChanged { .. } => "presence",
             DomainEvent::DeviceProtected { .. } => "protected",
             DomainEvent::DeviceRestored { .. } => "restored",
@@ -375,7 +390,6 @@ fn full_flow_from_sidecar_lines_mutes_then_restores() {
     assert_eq!(
         kinds,
         vec![
-            "meeting",
             "presence", // away
             "protected",
             "protected", // mic, camera
@@ -393,7 +407,7 @@ fn flickering_face_edges_do_not_trip_protection_early() {
     // sidecar reported transitional phases.
     let (mut c, h) = build(BehaviorConfig::default(), false, true);
     h.at(0);
-    c.on_meeting_sample(true);
+    c.set_enabled(true);
 
     feed_line(&mut c, &presence_line("leaving", 0)); // face blips out
     h.at(400);
@@ -411,12 +425,12 @@ fn flickering_face_edges_do_not_trip_protection_early() {
 fn malformed_sidecar_lines_are_ignored_without_affecting_state() {
     let (mut c, h) = build(BehaviorConfig::default(), false, true);
     h.at(0);
-    c.on_meeting_sample(true);
+    c.set_enabled(true);
 
     // Garbage, a stray diagnostic on stdout, and a wrong-type message: all no-ops.
     feed_line(&mut c, "not json at all");
     feed_line(&mut c, "detector started at 15.0 FPS");
-    feed_line(&mut c, r#"{"type":"meeting","state":"away","at_ms":1}"#);
+    feed_line(&mut c, r#"{"type":"heartbeat","state":"away","at_ms":1}"#);
     h.at(5_000);
     feed_line(&mut c, "");
 

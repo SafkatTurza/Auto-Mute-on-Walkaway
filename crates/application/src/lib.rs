@@ -1,10 +1,11 @@
 //! Application layer: the walkaway orchestration use case.
 //!
-//! [`WalkawayController`] is the brain of the MVP. It consumes presence and
-//! meeting samples, runs them through the domain state machines, and — when the
-//! user walks away *during a meeting* — protects the configured devices (mute
-//! mic, disable camera), restoring them when the user returns or the meeting
-//! ends. It emits [`DomainEvent`]s onto the event bus for the rest of the app.
+//! [`WalkawayController`] is the brain of the MVP. It consumes presence samples,
+//! runs them through the domain presence tracker, and — while protection is
+//! enabled and the user walks away — protects the configured devices (mute mic,
+//! disable camera), restoring them when the user returns or protection is
+//! switched off. It emits [`DomainEvent`]s onto the event bus for the rest of
+//! the app.
 
 mod ports;
 pub mod presence_source;
@@ -13,10 +14,7 @@ pub use ports::{Camera, Clock, Microphone, Notifier, PortError, PortResult};
 pub use presence_source::{parse_line, DetectorPhase, PresenceReport};
 
 use amow_config::BehaviorConfig;
-use amow_domain::{
-    DeviceKind, DomainEvent, MeetingState, MeetingTracker, PresenceConfig, PresenceState,
-    PresenceTracker,
-};
+use amow_domain::{DeviceKind, DomainEvent, PresenceConfig, PresenceState, PresenceTracker};
 use amow_eventbus::EventBus;
 
 /// Records what the controller changed during one protection episode, so that
@@ -42,7 +40,10 @@ where
 {
     behavior: BehaviorConfig,
     presence: PresenceTracker,
-    meeting: MeetingTracker,
+    /// The master switch: protection only ever engages while this is on. It is
+    /// toggled by the user (and, later, could be driven by any policy source)
+    /// and replaces the former meeting gate.
+    enabled: bool,
     clock: CK,
     mic: MIC,
     camera: CAM,
@@ -71,7 +72,9 @@ where
         Self {
             behavior,
             presence: PresenceTracker::new(presence_config),
-            meeting: MeetingTracker::new(),
+            // Starts off: the user explicitly enables protection (App Starts →
+            // User enables Protection), so nothing is ever touched until asked.
+            enabled: false,
             clock,
             mic,
             camera,
@@ -85,8 +88,8 @@ where
         self.presence.state()
     }
 
-    pub fn meeting_state(&self) -> MeetingState {
-        self.meeting.state()
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
     }
 
     pub fn is_protecting(&self) -> bool {
@@ -118,22 +121,26 @@ where
         }
     }
 
-    /// Feed one raw "meeting active" sample.
-    pub fn on_meeting_sample(&mut self, active: bool) {
-        let now = self.clock.now_ms();
-        if let Some(state) = self.meeting.observe(active, now) {
-            self.bus
-                .publish(&DomainEvent::MeetingChanged { state, at: now });
-            self.reconcile(now);
+    /// Turn walkaway protection on or off (the user's master switch).
+    ///
+    /// Reconciles immediately so flipping it takes effect at once: enabling
+    /// while the user is already away engages protection now, and disabling
+    /// while protecting restores the devices. A no-op when unchanged, so it is
+    /// cheap to call every sample cycle.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        if self.enabled == enabled {
+            return;
         }
+        self.enabled = enabled;
+        let now = self.clock.now_ms();
+        self.reconcile(now);
     }
 
     /// Decide whether devices should currently be protected and act on any
-    /// change. Protection engages only while a meeting is active *and* the user
-    /// is away; any other combination triggers restore.
+    /// change. Protection engages only while it is enabled *and* the user is
+    /// away; any other combination triggers restore.
     fn reconcile(&mut self, now: u64) {
-        let should_protect = self.meeting.state() == MeetingState::Active
-            && self.presence.state() == PresenceState::Away;
+        let should_protect = self.enabled && self.presence.state() == PresenceState::Away;
 
         match (should_protect, self.protection.is_some()) {
             (true, false) => self.engage_protection(now),

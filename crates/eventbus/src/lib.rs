@@ -72,7 +72,7 @@ impl EventBus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use amow_domain::{MeetingState, PresenceState};
+    use amow_domain::{DeviceKind, PresenceState};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn presence_evt() -> DomainEvent {
@@ -103,8 +103,9 @@ mod tests {
             c.fetch_add(1, Ordering::SeqCst);
         }));
         bus.publish(&presence_evt());
-        bus.publish(&DomainEvent::MeetingChanged {
-            state: MeetingState::Active,
+        bus.publish(&DomainEvent::DeviceProtected {
+            device: DeviceKind::Microphone,
+            was_active: true,
             at: 2,
         });
         assert_eq!(count.load(Ordering::SeqCst), 2);
