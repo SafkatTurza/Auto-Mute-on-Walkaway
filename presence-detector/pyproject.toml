@@ -25,6 +25,11 @@ amow-presence = "amow_presence.__main__:main"
 [tool.setuptools]
 packages = ["amow_presence"]
 
+# Ship the bundled face-detection model with the package so the detector runs
+# entirely locally (no download) and finds the model in wheels too.
+[tool.setuptools.package-data]
+amow_presence = ["models/*.tflite"]
+
 [tool.pytest.ini_options]
 # Flat layout: make the package importable when running from this directory.
 pythonpath = ["."]

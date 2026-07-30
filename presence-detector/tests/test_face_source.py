@@ -4,7 +4,8 @@ The real OpenCV and MediaPipe are never imported: fakes are injected into
 ``sys.modules`` so ``open()`` exercises its acquisition and cleanup logic on any
 machine, camera or not. The bug these guard against: a detector-build failure
 that leaves the camera open, so every later tick crash-loops on a stale,
-half-open source.
+half-open source. Detection goes through MediaPipe's Tasks API, so the fake
+mediapipe mirrors that surface (``mediapipe.tasks.python`` + ``.vision``).
 """
 
 from __future__ import annotations
@@ -42,27 +43,49 @@ def _install_fake_cv2(capture: FakeCapture) -> ModuleType:
 
 _MEDIAPIPE_MODULES = (
     "mediapipe",
-    "mediapipe.solutions",
-    "mediapipe.solutions.face_detection",
+    "mediapipe.tasks",
+    "mediapipe.tasks.python",
+    "mediapipe.tasks.python.vision",
 )
 
 
-def _install_fake_mediapipe(detector_factory) -> None:
-    """Register a fake mediapipe whose face-detection *submodule* is importable.
+def _install_fake_mediapipe(create_from_options) -> None:
+    """Register a fake mediapipe exposing the Tasks face-detector surface.
 
-    The code under test does ``from mediapipe(.python).solutions import
-    face_detection``, so the fake must exist as real ``sys.modules`` entries,
-    not merely as an attribute on the top-level module.
+    The code under test does ``import mediapipe as mp`` plus ``from
+    mediapipe.tasks import python`` and ``from mediapipe.tasks.python import
+    vision``, so those must be real ``sys.modules`` entries. ``create_from_options``
+    stands in for ``FaceDetector.create_from_options`` — the test injects one
+    that succeeds or raises.
     """
     mp = ModuleType("mediapipe")
-    solutions = ModuleType("mediapipe.solutions")
-    face_detection = ModuleType("mediapipe.solutions.face_detection")
-    face_detection.FaceDetection = detector_factory  # type: ignore[attr-defined]
-    solutions.face_detection = face_detection  # type: ignore[attr-defined]
-    mp.solutions = solutions  # type: ignore[attr-defined]
+    mp.ImageFormat = SimpleNamespace(SRGB=1)  # type: ignore[attr-defined]
+    mp.Image = lambda image_format, data: SimpleNamespace(  # type: ignore[attr-defined]
+        image_format=image_format, data=data
+    )
+
+    tasks = ModuleType("mediapipe.tasks")
+    tasks_python = ModuleType("mediapipe.tasks.python")
+    tasks_python.BaseOptions = lambda model_asset_path: SimpleNamespace(  # type: ignore[attr-defined]
+        model_asset_path=model_asset_path
+    )
+    vision = ModuleType("mediapipe.tasks.python.vision")
+    vision.FaceDetectorOptions = lambda **kwargs: SimpleNamespace(**kwargs)  # type: ignore[attr-defined]
+    vision.FaceDetector = SimpleNamespace(create_from_options=create_from_options)  # type: ignore[attr-defined]
+
+    tasks_python.vision = vision  # type: ignore[attr-defined]
+    tasks.python = tasks_python  # type: ignore[attr-defined]
+    mp.tasks = tasks  # type: ignore[attr-defined]
+
     sys.modules["mediapipe"] = mp
-    sys.modules["mediapipe.solutions"] = solutions
-    sys.modules["mediapipe.solutions.face_detection"] = face_detection
+    sys.modules["mediapipe.tasks"] = tasks
+    sys.modules["mediapipe.tasks.python"] = tasks_python
+    sys.modules["mediapipe.tasks.python.vision"] = vision
+
+
+def _working_detector():
+    """A detector whose detect() reports no face (the simplest valid result)."""
+    return SimpleNamespace(detect=lambda _image: SimpleNamespace(detections=[]))
 
 
 class OpenAtomicityTests(unittest.TestCase):
@@ -75,10 +98,10 @@ class OpenAtomicityTests(unittest.TestCase):
         capture = FakeCapture(opened=True)
         _install_fake_cv2(capture)
 
-        def broken_detector(**_kwargs):
+        def broken(_options):
             raise RuntimeError("incompatible mediapipe build")
 
-        _install_fake_mediapipe(broken_detector)
+        _install_fake_mediapipe(broken)
 
         source = MediaPipeFaceSource(camera_index=0)
         with self.assertRaises(FaceSourceError):
@@ -96,13 +119,13 @@ class OpenAtomicityTests(unittest.TestCase):
 
         attempts = {"n": 0}
 
-        def sometimes_detector(**_kwargs):
+        def sometimes(_options):
             attempts["n"] += 1
             if attempts["n"] == 1:
                 raise RuntimeError("first attempt fails")
-            return SimpleNamespace(process=lambda _rgb: SimpleNamespace(detections=[]))
+            return _working_detector()
 
-        _install_fake_mediapipe(sometimes_detector)
+        _install_fake_mediapipe(sometimes)
 
         source = MediaPipeFaceSource(camera_index=0)
         with self.assertRaises(FaceSourceError):
@@ -120,12 +143,24 @@ class OpenAtomicityTests(unittest.TestCase):
     def test_camera_open_failure_releases_and_raises(self) -> None:
         capture = FakeCapture(opened=False)
         _install_fake_cv2(capture)
-        _install_fake_mediapipe(lambda **_kwargs: None)
+        _install_fake_mediapipe(lambda _options: _working_detector())
 
         source = MediaPipeFaceSource(camera_index=3)
         with self.assertRaises(FaceSourceError):
             source.open()
         self.assertEqual(capture.released, 1)
+        self.assertIsNone(source._capture)
+
+    def test_missing_model_file_raises_capture_error(self) -> None:
+        capture = FakeCapture(opened=True)
+        _install_fake_cv2(capture)
+        _install_fake_mediapipe(lambda _options: _working_detector())
+
+        source = MediaPipeFaceSource(camera_index=0, model_path="/no/such/model.tflite")
+        with self.assertRaises(FaceSourceError):
+            source.open()
+        # The camera is never opened when the model is missing.
+        self.assertEqual(capture.released, 0)
         self.assertIsNone(source._capture)
 
 

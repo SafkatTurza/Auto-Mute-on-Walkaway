@@ -67,7 +67,14 @@ Thresholds live in `DetectorConfig` and are validated on construction:
 | `target_fps`               | 15.0    | Detection rate; caps CPU cost             |
 | `camera_index`             | 0       | Which webcam to open                      |
 | `min_detection_confidence` | 0.5     | MediaPipe face-detection threshold        |
-| `model_selection`          | 0       | 0 = short-range (cheap), 1 = full-range   |
+| `model_selection`          | 0       | Accepted for compatibility; see note      |
+
+Detection uses MediaPipe's **Tasks** API (`mediapipe.tasks…FaceDetector`), the
+API in current MediaPipe (1.0+, which dropped the old `mediapipe.solutions`
+package) and in 0.10.x alike. It runs a small BlazeFace short-range model
+bundled in `amow_presence/models/` — no download, no network. `model_selection`
+is still accepted (the old solutions API had a full-range variant) but the Tasks
+model is short-range, which is the right choice for desk-distance webcam use.
 
 The two grace periods are **shared** with the app's `config.json` (the
 `presence` block); `DetectorConfig.from_app_config_file()` reads just those keys
