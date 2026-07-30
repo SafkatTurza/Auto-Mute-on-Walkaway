@@ -87,6 +87,14 @@ a reproducible build.
      automatically.
    - Otherwise use **Simulate presence → Away** to trigger a walkaway. This
      drives the *real* logic (it mutes your actual mic).
+
+> **Tip — one-click launch with presence.** Rather than setting the
+> `AMOW_PRESENCE_*` variables by hand, run the bundled helper from the repo
+> root: `./run-with-presence.ps1`. It finds a MediaPipe-capable Python
+> (3.9–3.12), checks the detector's dependencies, points the app at that
+> interpreter, and starts the app. Add `-AsAdmin` to run elevated (so the
+> camera can be disabled), `-Install` to install the detector's Python
+> dependencies first, or `-Dev` to run from source with `npm run tauri dev`.
 5. Adjust **Automatic actions** (mute mic / disable camera / restore / notify),
    **Timing** (sample interval and away/return grace), and **Logging**, then
    **Save settings**.
