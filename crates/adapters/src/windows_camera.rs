@@ -206,6 +206,15 @@ impl<D: CameraDevices> Camera for WindowsCamera<D> {
     }
 }
 
+/// Whether this platform's native camera adapter can control (disable *and*
+/// re-enable) camera devices in the current process — i.e. the app is elevated
+/// on Windows. The UI queries this so it can warn *before* the user enables
+/// camera control the app would not be able to honour, rather than only after a
+/// walkaway. Mirrors [`WindowsCamera::can_restore`].
+pub fn camera_control_available() -> bool {
+    is_elevated()
+}
+
 /// Whether the current process is running with an elevated (administrator)
 /// token. On non-Windows hosts (where this adapter is compiled only for its
 /// portable unit tests) there is no such gate, so it reports true.

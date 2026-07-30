@@ -45,6 +45,17 @@ body {
   font-size: 12px;
 }
 
+/* Inline caution shown under a toggle whose action the app can't currently
+   honour (e.g. camera control without administrator rights). */
+.warn-inline {
+  color: var(--warn);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0 4px;
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--card-border);

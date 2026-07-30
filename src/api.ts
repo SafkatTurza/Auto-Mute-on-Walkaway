@@ -11,6 +11,10 @@ export const saveConfig = (newConfig: AppConfig): Promise<void> =>
 
 export const getStatus = (): Promise<Status> => invoke("get_status");
 
+/** Whether the app can control the camera (elevated on Windows). */
+export const getCameraControlAvailable = (): Promise<boolean> =>
+  invoke("get_camera_control_available");
+
 export const setEnabled = (enabled: boolean): Promise<void> =>
   invoke("set_enabled", { enabled });
 

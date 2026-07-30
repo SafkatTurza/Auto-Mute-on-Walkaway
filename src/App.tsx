@@ -11,6 +11,10 @@ export default function App() {
   const [enabled, setEnabled] = useState(false);
   const [present, setPresent] = useState(true);
   const [autostart, setAutostart] = useState(false);
+  // Whether the app can actually control the camera in this process (elevated on
+  // Windows). null = not yet known; used to warn before enabling camera control
+  // the app couldn't honour. Elevation is fixed for the process lifetime.
+  const [cameraControl, setCameraControl] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -28,6 +32,7 @@ export default function App() {
   useEffect(() => {
     api.getConfig().then(setConfig).catch((e) => setError(String(e)));
     api.getAutostart().then(setAutostart).catch(() => {});
+    api.getCameraControlAvailable().then(setCameraControl).catch(() => {});
     refreshStatus();
 
     const timer = setInterval(refreshStatus, 1000);
@@ -194,6 +199,14 @@ export default function App() {
           checked={b.auto_camera_off}
           onChange={(v) => setBehavior("auto_camera_off", v)}
         />
+        {b.auto_camera_off && cameraControl === false && (
+          <p className="muted small warn-inline">
+            ⚠️ Camera control needs administrator rights. This app isn't
+            elevated, so it <strong>won't disable the camera</strong> — it will
+            leave it untouched (your mic is still muted). Relaunch as
+            administrator to enable camera control.
+          </p>
+        )}
         <Toggle
           label="Restore on return"
           checked={b.auto_restore}

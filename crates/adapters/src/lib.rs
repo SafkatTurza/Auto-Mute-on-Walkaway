@@ -35,7 +35,7 @@ pub use journal::{CameraJournal, FileCameraJournal, NullCameraJournal};
 pub use microphone::PulseMicrophone;
 pub use platform::{default_camera, default_microphone, PlatformCamera, PlatformMicrophone};
 pub use sysfs::{RealSysfs, Sysfs};
-pub use windows_camera::{CameraDevices, WindowsCamera};
+pub use windows_camera::{camera_control_available, CameraDevices, WindowsCamera};
 pub use windows_microphone::{EndpointVolume, WindowsMicrophone};
 
 #[cfg(target_os = "windows")]

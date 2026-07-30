@@ -35,6 +35,14 @@ pub fn get_status(state: State<AppState>) -> Status {
     state.status.snapshot()
 }
 
+/// Whether the app can actually control the camera (disable *and* re-enable it)
+/// in this process — on Windows, whether it is running elevated. The UI uses
+/// this to warn before the user enables camera control it could not honour.
+#[tauri::command]
+pub fn get_camera_control_available() -> bool {
+    amow_adapters::camera_control_available()
+}
+
 /// Turn walkaway protection on or off (the user's master switch).
 #[tauri::command]
 pub fn set_enabled(enabled: bool, state: State<AppState>) {

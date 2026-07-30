@@ -161,6 +161,7 @@ fn main() {
             commands::get_config,
             commands::save_config,
             commands::get_status,
+            commands::get_camera_control_available,
             commands::set_enabled,
             commands::set_present,
             commands::get_autostart,
