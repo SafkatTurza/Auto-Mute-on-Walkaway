@@ -31,4 +31,7 @@ export interface Status {
   presence: "present" | "away";
   enabled: boolean;
   protecting: boolean;
+  mic_muted: boolean;
+  camera_off: boolean;
+  camera_blocked: boolean;
 }

@@ -20,6 +20,9 @@ struct DeviceCell {
     value: AtomicBool,
     writes: AtomicU32,
     fail: AtomicBool,
+    /// Reads succeed but writes fail — models a camera that is visible/queryable
+    /// but cannot be toggled without elevated privileges.
+    fail_write: AtomicBool,
 }
 impl DeviceCell {
     fn new(v: bool) -> Self {
@@ -27,6 +30,7 @@ impl DeviceCell {
             value: AtomicBool::new(v),
             writes: AtomicU32::new(0),
             fail: AtomicBool::new(false),
+            fail_write: AtomicBool::new(false),
         }
     }
     fn value(&self) -> bool {
@@ -37,6 +41,9 @@ impl DeviceCell {
     }
     fn set_fail(&self) {
         self.fail.store(true, REL);
+    }
+    fn set_fail_write(&self) {
+        self.fail_write.store(true, REL);
     }
 }
 
@@ -56,7 +63,7 @@ impl Microphone for FakeMic {
         Ok(self.0.value.load(REL))
     }
     fn set_muted(&self, muted: bool) -> PortResult<()> {
-        if self.0.fail.load(REL) {
+        if self.0.fail.load(REL) || self.0.fail_write.load(REL) {
             return Err(PortError::new("mic fail"));
         }
         self.0.value.store(muted, REL);
@@ -74,7 +81,7 @@ impl Camera for FakeCam {
         Ok(self.0.value.load(REL))
     }
     fn set_enabled(&self, enabled: bool) -> PortResult<()> {
-        if self.0.fail.load(REL) {
+        if self.0.fail.load(REL) || self.0.fail_write.load(REL) {
             return Err(PortError::new("cam fail"));
         }
         self.0.value.store(enabled, REL);
@@ -279,6 +286,44 @@ fn mic_port_failure_does_not_crash_and_still_handles_camera() {
     walk_away(&mut c, &h);
     assert!(!h.cam.value(), "camera should still be disabled");
     assert!(c.is_protecting());
+}
+
+#[test]
+fn exposes_live_device_state_for_the_ui() {
+    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    // Idle: nothing engaged.
+    assert!(!c.mic_muted_by_app());
+    assert!(!c.camera_disabled_by_app());
+    assert!(!c.camera_blocked());
+
+    walk_away(&mut c, &h);
+    assert!(c.mic_muted_by_app(), "UI should show the mic as muted");
+    assert!(c.camera_disabled_by_app(), "UI should show the camera off");
+    assert!(!c.camera_blocked());
+
+    // Return restores devices and clears the live indicators.
+    h.at(1_000);
+    c.on_face_sample(true);
+    h.at(1_500);
+    c.on_face_sample(true);
+    assert!(!c.mic_muted_by_app());
+    assert!(!c.camera_disabled_by_app());
+}
+
+#[test]
+fn camera_blocked_is_reported_when_disable_is_denied() {
+    // A live camera that cannot be toggled (no privilege): the mic is still
+    // muted, and the UI is told the camera was blocked rather than silently off.
+    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    h.cam.set_fail_write();
+    walk_away(&mut c, &h);
+
+    assert!(c.is_protecting());
+    assert!(c.mic_muted_by_app(), "mic still protected");
+    assert!(h.mic.value(), "mic really muted");
+    assert!(!c.camera_disabled_by_app(), "camera was not disabled");
+    assert!(c.camera_blocked(), "UI told the camera disable was blocked");
+    assert!(h.cam.value(), "camera left on because disable failed");
 }
 
 #[test]

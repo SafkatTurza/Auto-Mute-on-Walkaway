@@ -7,6 +7,7 @@
   --accent: #6366f1;
   --accent-soft: #3a3f66;
   --on: #22c55e;
+  --warn: #f59e0b;
   --error: #f87171;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
@@ -61,9 +62,13 @@ body {
 
 .status {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.status .pill {
+  align-self: flex-start;
 }
 
 .pill {
@@ -81,8 +86,9 @@ body {
 }
 
 .statgrid {
-  display: flex;
-  gap: 22px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 22px;
   margin: 0;
 }
 
@@ -97,6 +103,18 @@ body {
   font-size: 15px;
   font-weight: 600;
   text-transform: capitalize;
+}
+
+.statgrid dd.live-good {
+  color: var(--on);
+}
+
+.statgrid dd.live-bad {
+  color: var(--error);
+}
+
+.statgrid dd.live-warn {
+  color: var(--warn);
 }
 
 .field {

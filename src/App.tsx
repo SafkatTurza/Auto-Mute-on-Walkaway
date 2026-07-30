@@ -120,7 +120,37 @@ export default function App() {
             <dt>Protection</dt>
             <dd>{status?.enabled ? "on" : "off"}</dd>
           </div>
+          <div>
+            <dt>Microphone</dt>
+            <dd className={status?.mic_muted ? "live-bad" : "live-good"}>
+              {status?.mic_muted ? "🔴 Muted" : "🟢 Live"}
+            </dd>
+          </div>
+          <div>
+            <dt>Camera</dt>
+            <dd
+              className={
+                status?.camera_off
+                  ? "live-bad"
+                  : status?.camera_blocked
+                    ? "live-warn"
+                    : "live-good"
+              }
+            >
+              {status?.camera_off
+                ? "⚫ Off"
+                : status?.camera_blocked
+                  ? "⚠️ Needs admin"
+                  : "🟢 On"}
+            </dd>
+          </div>
         </dl>
+        {status?.camera_blocked && (
+          <p className="muted small">
+            Camera couldn't be disabled — run the app as administrator to allow
+            it. Your microphone is still protected.
+          </p>
+        )}
       </section>
 
       <section className="card">

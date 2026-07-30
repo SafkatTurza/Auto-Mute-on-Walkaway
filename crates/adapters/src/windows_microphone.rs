@@ -1,9 +1,12 @@
 //! Native Windows microphone adapter.
 //!
-//! Mutes the system's default *communications* capture device through the
-//! WASAPI Core Audio endpoint volume interface (`IAudioEndpointVolume`) — the
-//! same switch the Windows "Sound" control panel and conferencing apps toggle,
-//! and a true system-wide mute rather than a per-app hint.
+//! Mutes the system's default capture device through the WASAPI Core Audio
+//! endpoint volume interface (`IAudioEndpointVolume`) — the same switch the
+//! Windows "Sound" control panel and conferencing apps toggle, and a true
+//! system-wide mute rather than a per-app hint. It mutes *both* the general
+//! (`eConsole`) and communications (`eCommunications`) default roles, so the mic
+//! the user actually uses is silenced even when those roles point at different
+//! devices.
 //!
 //! The COM plumbing is isolated behind the [`EndpointVolume`] seam, exactly as
 //! the PulseAudio adapter hides `pactl` behind [`CommandRunner`]. That keeps the
@@ -77,13 +80,19 @@ mod real {
     use windows::Win32::Foundation::BOOL;
     use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
     use windows::Win32::Media::Audio::{
-        eCapture, eCommunications, IMMDeviceEnumerator, MMDeviceEnumerator,
+        eCapture, eCommunications, eConsole, ERole, IMMDeviceEnumerator, MMDeviceEnumerator,
     };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
     };
 
-    /// Real [`EndpointVolume`] over the default communications capture device.
+    /// Capture-device roles muted on walkaway: the general default (`eConsole`,
+    /// what Sound settings shows as "Default Device") and the communications
+    /// default (`eCommunications`, what calls use). On most machines these are
+    /// the same device; muting both covers the split-device case too.
+    const MUTED_ROLES: [ERole; 2] = [eConsole, eCommunications];
+
+    /// Real [`EndpointVolume`] over the default capture device(s).
     pub struct CoreAudioEndpoint;
 
     impl Default for CoreAudioEndpoint {
@@ -97,11 +106,12 @@ mod real {
             Self
         }
 
-        /// Activate `IAudioEndpointVolume` for the default capture endpoint.
+        /// Activate `IAudioEndpointVolume` for the default capture endpoint of a
+        /// given role.
         ///
         /// Re-acquired per call so the adapter always follows the user's current
         /// default device rather than caching a stale endpoint.
-        fn endpoint(&self) -> PortResult<IAudioEndpointVolume> {
+        fn endpoint_for(&self, role: ERole) -> PortResult<IAudioEndpointVolume> {
             unsafe {
                 // COM may already be initialised on this thread (e.g. by Tauri);
                 // a benign S_FALSE/RPC_E_CHANGED_MODE is not fatal for our use, so
@@ -112,7 +122,7 @@ mod real {
                     CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                         .map_err(win_err("create device enumerator"))?;
                 let device = enumerator
-                    .GetDefaultAudioEndpoint(eCapture, eCommunications)
+                    .GetDefaultAudioEndpoint(eCapture, role)
                     .map_err(win_err("get default capture endpoint"))?;
                 let volume: IAudioEndpointVolume = device
                     .Activate(CLSCTX_ALL, None)
@@ -124,16 +134,36 @@ mod real {
 
     impl EndpointVolume for CoreAudioEndpoint {
         fn get_mute(&self) -> PortResult<i32> {
-            let volume = self.endpoint()?;
+            // Report the general default device's mute state.
+            let volume = self.endpoint_for(eConsole)?;
             let muted: BOOL = unsafe { volume.GetMute() }.map_err(win_err("query mute"))?;
             Ok(muted.0)
         }
 
         fn set_mute(&self, muted: i32) -> PortResult<()> {
-            let volume = self.endpoint()?;
-            // A null event-context GUID: we are not correlating change events.
-            unsafe { volume.SetMute(BOOL(muted), std::ptr::null::<GUID>()) }
-                .map_err(win_err("set mute"))
+            // Apply to every default role; succeed if at least one endpoint took
+            // it, so a machine missing one role still gets muted. Setting the
+            // same underlying device twice is harmless.
+            let mut any_ok = false;
+            let mut last_err = None;
+            for role in MUTED_ROLES {
+                match self.endpoint_for(role) {
+                    // A null event-context GUID: we are not correlating changes.
+                    Ok(volume) => {
+                        match unsafe { volume.SetMute(BOOL(muted), std::ptr::null::<GUID>()) } {
+                            Ok(()) => any_ok = true,
+                            Err(e) => last_err = Some(win_err("set mute")(e)),
+                        }
+                    }
+                    Err(e) => last_err = Some(e),
+                }
+            }
+            if any_ok {
+                Ok(())
+            } else {
+                Err(last_err
+                    .unwrap_or_else(|| PortError::new("windows audio: no default capture device")))
+            }
         }
     }
 

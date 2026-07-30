@@ -25,6 +25,10 @@ struct Protection {
     prev_mic_muted: Option<bool>,
     /// The camera's prior `enabled` state, set only if the controller disabled it.
     prev_cam_enabled: Option<bool>,
+    /// True when a live camera was found but disabling it failed — almost always
+    /// missing privileges (the app is not running elevated). Surfaced to the UI
+    /// so the user is told *why* the camera stayed on, rather than guessing.
+    cam_blocked: bool,
 }
 
 /// Orchestrates auto-mute / auto-camera-off / auto-restore.
@@ -93,6 +97,26 @@ where
 
     pub fn is_protecting(&self) -> bool {
         self.protection.is_some()
+    }
+
+    /// Whether the app currently has the microphone muted as part of an active
+    /// protection episode. Drives the UI's live "mic muted" indicator.
+    pub fn mic_muted_by_app(&self) -> bool {
+        self.protection.is_some_and(|p| p.prev_mic_muted.is_some())
+    }
+
+    /// Whether the app currently has the camera disabled as part of an active
+    /// protection episode. Drives the UI's live "camera off" indicator.
+    pub fn camera_disabled_by_app(&self) -> bool {
+        self.protection
+            .is_some_and(|p| p.prev_cam_enabled.is_some())
+    }
+
+    /// Whether the app tried to disable a live camera during the current episode
+    /// but could not (typically because it is not running elevated). Lets the UI
+    /// tell the user to run as administrator instead of silently doing nothing.
+    pub fn camera_blocked(&self) -> bool {
+        self.protection.is_some_and(|p| p.cam_blocked)
     }
 
     /// Apply new behaviour policy at runtime (e.g. the user changed a toggle in
@@ -181,6 +205,11 @@ where
                             at: now,
                         });
                         self.maybe_notify("Camera disabled", "You stepped away — camera off.");
+                    } else {
+                        // A live camera we could not turn off — almost always a
+                        // privilege problem. Remember it so the UI can prompt the
+                        // user to run elevated; the mic is still protected.
+                        protection.cam_blocked = true;
                     }
                 }
                 Ok(false) => {}

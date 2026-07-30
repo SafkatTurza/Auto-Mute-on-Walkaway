@@ -6,7 +6,8 @@ use amow_application::{Camera, Clock, Microphone, Notifier, WalkawayController};
 use amow_domain::PresenceState;
 use serde::Serialize;
 
-/// What the front end renders: current presence, enable, and protection state.
+/// What the front end renders: current presence, enable, and protection state,
+/// plus the live device outcome so the user can *see* the app acting.
 #[derive(Clone, Serialize)]
 pub struct Status {
     /// `"present"` or `"away"`.
@@ -15,6 +16,13 @@ pub struct Status {
     pub enabled: bool,
     /// Whether the app is currently holding devices protected.
     pub protecting: bool,
+    /// Whether the app currently has the microphone muted.
+    pub mic_muted: bool,
+    /// Whether the app currently has the camera disabled.
+    pub camera_off: bool,
+    /// Whether the app found a live camera but could not disable it (needs the
+    /// app to run as administrator). Lets the UI explain instead of failing mute.
+    pub camera_blocked: bool,
 }
 
 impl Default for Status {
@@ -24,6 +32,9 @@ impl Default for Status {
             presence: "present",
             enabled: false,
             protecting: false,
+            mic_muted: false,
+            camera_off: false,
+            camera_blocked: false,
         }
     }
 }
@@ -49,6 +60,9 @@ impl SharedStatus {
             },
             enabled: controller.is_enabled(),
             protecting: controller.is_protecting(),
+            mic_muted: controller.mic_muted_by_app(),
+            camera_off: controller.camera_disabled_by_app(),
+            camera_blocked: controller.camera_blocked(),
         };
         *self.0.lock().expect("status mutex poisoned") = snapshot;
     }
