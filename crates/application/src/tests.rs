@@ -327,6 +327,85 @@ fn camera_blocked_is_reported_when_disable_is_denied() {
 }
 
 #[test]
+fn shutdown_restores_devices_it_changed() {
+    // The clean-exit contract: quitting while protecting must un-mute the mic and
+    // re-enable the camera the app disabled.
+    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    walk_away(&mut c, &h);
+    assert!(h.mic.value() && !h.cam.value(), "protected before shutdown");
+
+    c.shutdown();
+
+    assert!(!h.mic.value(), "mic un-muted on shutdown");
+    assert!(h.cam.value(), "camera re-enabled on shutdown");
+    assert!(!c.is_protecting(), "the episode is ended");
+}
+
+#[test]
+fn shutdown_restores_even_when_auto_restore_is_off() {
+    // auto_restore=false keeps devices off on a *return*, but shutting the app
+    // down must still restore them — a disabled camera must never outlive the app.
+    let behavior = BehaviorConfig {
+        auto_restore: false,
+        ..BehaviorConfig::default()
+    };
+    let (mut c, h) = build(behavior, false, true);
+    walk_away(&mut c, &h);
+    assert!(h.mic.value() && !h.cam.value(), "protected before shutdown");
+
+    c.shutdown();
+
+    assert!(
+        !h.mic.value(),
+        "mic un-muted on shutdown despite auto_restore off"
+    );
+    assert!(
+        h.cam.value(),
+        "camera re-enabled on shutdown despite auto_restore off"
+    );
+    assert!(!c.is_protecting());
+}
+
+#[test]
+fn shutdown_without_protection_touches_nothing() {
+    // Quitting while idle (never walked away) must not write to any device.
+    let (mut c, h) = build(BehaviorConfig::default(), false, true);
+    c.set_enabled(true);
+    c.shutdown();
+    assert_eq!(
+        h.mic.writes(),
+        0,
+        "no mic writes when nothing was protected"
+    );
+    assert_eq!(
+        h.cam.writes(),
+        0,
+        "no cam writes when nothing was protected"
+    );
+    assert!(h.cam.value(), "camera left as the user had it");
+}
+
+#[test]
+fn shutdown_does_not_touch_devices_the_user_had_set() {
+    // The user muted their own mic and disabled their own camera before walking
+    // away; the app engaged an (empty) episode. Shutdown must leave both as the
+    // user set them — it only reverts the app's own changes.
+    let (mut c, h) = build(BehaviorConfig::default(), true, false);
+    walk_away(&mut c, &h);
+    assert!(
+        c.is_protecting(),
+        "an episode is recorded even with nothing to change"
+    );
+
+    c.shutdown();
+
+    assert!(h.mic.value(), "user's mic mute preserved");
+    assert!(!h.cam.value(), "user's disabled camera preserved");
+    assert_eq!(h.mic.writes(), 0, "app never wrote the mic");
+    assert_eq!(h.cam.writes(), 0, "app never wrote the camera");
+}
+
+#[test]
 fn emits_expected_event_sequence() {
     let (mut c, h) = build(BehaviorConfig::default(), false, true);
     walk_away(&mut c, &h);

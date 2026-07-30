@@ -22,6 +22,8 @@ use std::sync::Mutex;
 
 use amow_application::{Camera, PortError, PortResult};
 
+use crate::journal::{CameraJournal, NullCameraJournal};
+
 /// Enumeration and enable/disable of the machine's camera devices.
 ///
 /// A port so the SetupAPI/CfgMgr plumbing is the only platform-specific part;
@@ -41,6 +43,9 @@ pub struct WindowsCamera<D: CameraDevices> {
     devices: D,
     /// Instance ids this adapter disabled and must re-enable to restore.
     disabled: Mutex<Vec<String>>,
+    /// Stable record of the disabled set, so a crash mid-protection can be
+    /// recovered on the next launch. Defaults to a no-op journal.
+    journal: Box<dyn CameraJournal>,
 }
 
 #[cfg(target_os = "windows")]
@@ -52,19 +57,60 @@ impl Default for WindowsCamera<SetupApiCameras> {
 
 #[cfg(target_os = "windows")]
 impl WindowsCamera<SetupApiCameras> {
-    /// Controller for the system's cameras using real SetupAPI access.
+    /// Controller for the system's cameras using real SetupAPI access, with no
+    /// crash-recovery journal. Prefer [`with_journal`](Self::with_journal) at the
+    /// composition root so an unexpected exit can be recovered.
     pub fn new() -> Self {
         Self::with_devices(SetupApiCameras::new())
     }
 }
 
 impl<D: CameraDevices> WindowsCamera<D> {
-    /// Construct with an explicit device backend — the seam tests use.
+    /// Construct with an explicit device backend and no persistence — the seam
+    /// tests use, and the default for callers that don't need recovery.
     pub fn with_devices(devices: D) -> Self {
+        Self::with_journal(devices, Box::new(NullCameraJournal))
+    }
+
+    /// Construct with an explicit device backend and a crash-recovery journal.
+    ///
+    /// The journal is written whenever the disabled set changes and read back by
+    /// [`recover`](Self::recover) on the next launch, so a camera the app
+    /// disabled is never left off after an unexpected exit.
+    pub fn with_journal(devices: D, journal: Box<dyn CameraJournal>) -> Self {
         Self {
             devices,
             disabled: Mutex::new(Vec::new()),
+            journal,
         }
+    }
+
+    /// Mirror the current disabled set to the journal (clears it when empty).
+    fn persist(&self) {
+        let ids = self.disabled.lock().expect("camera mutex poisoned").clone();
+        self.journal.save(&ids);
+    }
+
+    /// Re-enable any cameras a previous run disabled but never restored, as
+    /// recorded in the journal (e.g. after a crash or forced kill). The persisted
+    /// ids are adopted as this adapter's disabled set and restored — never a
+    /// camera the user disabled themselves, since only ids the app recorded are
+    /// ever touched. A no-op when the journal is empty. On success the journal is
+    /// cleared; ids that could not be re-enabled are kept for a later retry.
+    pub fn recover(&self) -> PortResult<()> {
+        let persisted = self.journal.load();
+        if persisted.is_empty() {
+            return Ok(());
+        }
+        {
+            let mut guard = self.disabled.lock().expect("camera mutex poisoned");
+            for id in persisted {
+                if !guard.contains(&id) {
+                    guard.push(id);
+                }
+            }
+        }
+        self.enable()
     }
 
     fn disable(&self) -> PortResult<()> {
@@ -94,6 +140,9 @@ impl<D: CameraDevices> WindowsCamera<D> {
             .lock()
             .expect("camera mutex poisoned")
             .extend(newly_disabled);
+        // Record the disabled set before returning, so an unexpected exit right
+        // after this can still be recovered on the next launch.
+        self.persist();
         Ok(())
     }
 
@@ -116,15 +165,22 @@ impl<D: CameraDevices> WindowsCamera<D> {
             }
         }
 
-        if failed.is_empty() {
-            return Ok(());
+        // Keep the ids we could not re-enable so a later cycle can retry, then
+        // update the journal to match: cleared on full success, or narrowed to
+        // just the still-disabled ids on partial failure.
+        let ok = failed.is_empty();
+        if !ok {
+            self.disabled
+                .lock()
+                .expect("camera mutex poisoned")
+                .extend(failed);
         }
-        // Keep the ids we could not re-enable so a later cycle can retry.
-        self.disabled
-            .lock()
-            .expect("camera mutex poisoned")
-            .extend(failed);
-        Err(last_err.unwrap_or_else(|| PortError::new("no camera re-enabled")))
+        self.persist();
+        if ok {
+            Ok(())
+        } else {
+            Err(last_err.unwrap_or_else(|| PortError::new("no camera re-enabled")))
+        }
     }
 }
 
@@ -321,6 +377,31 @@ pub use real::SetupApiCameras;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    /// A shareable in-memory [`CameraJournal`] so a test can hand the *same*
+    /// record to two adapters — modelling one process disabling the camera and a
+    /// later process (after a crash) recovering from what the first persisted.
+    #[derive(Clone, Default)]
+    struct FakeJournal(Arc<Mutex<Vec<String>>>);
+    impl FakeJournal {
+        fn ids(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+        fn seed(ids: &[&str]) -> Self {
+            Self(Arc::new(Mutex::new(
+                ids.iter().map(|s| s.to_string()).collect(),
+            )))
+        }
+    }
+    impl CameraJournal for FakeJournal {
+        fn load(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+        fn save(&self, ids: &[String]) {
+            *self.0.lock().unwrap() = ids.to_vec();
+        }
+    }
 
     /// In-memory camera set mapping instance id → enabled flag, tracking each
     /// toggle so a full disable→enable cycle can be verified without SetupAPI.
@@ -444,5 +525,94 @@ mod tests {
     fn enumeration_failure_is_reported_as_error() {
         let c = cam(FakeDevices::failing(&[("cam-a", true)]));
         assert!(c.is_enabled().is_err());
+    }
+
+    // --- Crash-recovery journal -------------------------------------------------
+
+    #[test]
+    fn disable_persists_the_disabled_set_and_enable_clears_it() {
+        let journal = FakeJournal::default();
+        let c = WindowsCamera::with_journal(
+            FakeDevices::with(&[("cam-a", true), ("cam-b", true)]),
+            Box::new(journal.clone()),
+        );
+
+        c.set_enabled(false).unwrap();
+        assert_eq!(
+            journal.ids(),
+            vec!["cam-a".to_string(), "cam-b".to_string()],
+            "the disabled ids are journalled while off"
+        );
+
+        c.set_enabled(true).unwrap();
+        assert!(
+            journal.ids().is_empty(),
+            "a clean restore clears the journal"
+        );
+    }
+
+    #[test]
+    fn recover_reenables_devices_a_previous_run_left_disabled() {
+        // Model a crash: a prior run disabled cam-a (recorded in the shared
+        // journal) and died without restoring, so the device is still disabled.
+        let journal = FakeJournal::seed(&["cam-a"]);
+        let devices = FakeDevices::with(&[("cam-a", false), ("cam-b", true)]);
+        let c = WindowsCamera::with_journal(devices, Box::new(journal.clone()));
+
+        c.recover().unwrap();
+
+        assert!(c.is_enabled().unwrap(), "the camera is switched back on");
+        assert_eq!(
+            c.devices.toggles(),
+            vec![("cam-a".to_string(), true)],
+            "only the journalled camera is re-enabled, once"
+        );
+        assert!(journal.ids().is_empty(), "recovery clears the journal");
+    }
+
+    #[test]
+    fn recover_with_an_empty_journal_touches_nothing() {
+        let journal = FakeJournal::default();
+        let c =
+            WindowsCamera::with_journal(FakeDevices::with(&[("cam-a", true)]), Box::new(journal));
+        c.recover().unwrap();
+        assert!(
+            c.devices.toggles().is_empty(),
+            "nothing to recover, nothing toggled"
+        );
+    }
+
+    #[test]
+    fn recover_never_reenables_a_camera_the_user_disabled() {
+        // The journal only lists cam-a (disabled by us). cam-b was off before the
+        // app ran (the user's own choice) and is absent from the journal, so
+        // recovery must leave it off.
+        let journal = FakeJournal::seed(&["cam-a"]);
+        let devices = FakeDevices::with(&[("cam-a", false), ("cam-b", false)]);
+        let c = WindowsCamera::with_journal(devices, Box::new(journal));
+
+        c.recover().unwrap();
+
+        assert_eq!(
+            c.devices.toggles(),
+            vec![("cam-a".to_string(), true)],
+            "only our camera is restored; the user's stays off"
+        );
+    }
+
+    #[test]
+    fn a_failed_recovery_keeps_the_journal_for_a_later_retry() {
+        // Re-enabling is denied (e.g. lost privilege): the journal must survive so
+        // a subsequent launch can try again rather than forgetting the camera.
+        let journal = FakeJournal::seed(&["cam-a"]);
+        let devices = FakeDevices::failing(&[("cam-a", false)]);
+        let c = WindowsCamera::with_journal(devices, Box::new(journal.clone()));
+
+        assert!(c.recover().is_err());
+        assert_eq!(
+            journal.ids(),
+            vec!["cam-a".to_string()],
+            "the id is retained for the next attempt"
+        );
     }
 }

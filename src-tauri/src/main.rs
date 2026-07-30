@@ -18,6 +18,7 @@ mod supervisor;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use amow_adapters::default_camera;
 use amow_config::AppConfig;
 use amow_domain::DomainEvent;
 use amow_eventbus::EventBus;
@@ -56,7 +57,12 @@ fn main() {
             let handle = app.handle();
 
             // --- Paths: config and logs live in the OS app data dirs ----------
-            let config_path = app.path().app_config_dir()?.join("config.json");
+            let config_dir = app.path().app_config_dir()?;
+            let config_path = config_dir.join("config.json");
+            // Where the camera adapter records the devices it disables, so an
+            // unexpected exit (crash, kill, power loss) can be recovered here on
+            // the next launch — the app must never leave the webcam disabled.
+            let camera_recovery_path = config_dir.join("camera-recovery.txt");
             let log_dir = app.path().app_log_dir()?;
             let log_path = log_dir.join("amow.log");
             let crash_path = log_dir.join("crash.log");
@@ -84,6 +90,16 @@ fn main() {
             // even in a windowed release build with no console.
             crash::install(crash_path, logger.clone());
 
+            // --- Camera crash recovery: undo a webcam a previous run left off -
+            // If the app disabled the camera and then crashed/was killed without
+            // restoring it, the device is still disabled at the OS level. Recover
+            // that here — re-enabling only the devices we recorded, never one the
+            // user disabled themselves — before anything else touches the camera.
+            match default_camera(camera_recovery_path.clone()).recover() {
+                Ok(()) => {}
+                Err(e) => logger.warn(&format!("camera recovery on startup failed: {e}")),
+            }
+
             // --- Event bus: log every domain event and mirror it to the UI ----
             let bus = EventBus::new();
             {
@@ -108,6 +124,7 @@ fn main() {
                 notifier,
                 shared_status.clone(),
                 logger.clone(),
+                camera_recovery_path,
             );
 
             // --- Presence bridge: spawn the webcam sidecar and feed samples ---
@@ -136,8 +153,19 @@ fn main() {
             commands::get_autostart,
             commands::set_autostart,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Auto-Mute on Walkaway");
+        .build(tauri::generate_context!())
+        .expect("error while building Auto-Mute on Walkaway")
+        .run(|app_handle, event| {
+            // On exit, restore any devices we changed before the process dies.
+            // The supervisor's Drop does this too, but Tauri may terminate the
+            // process without running destructors, so trigger it explicitly here
+            // and block until the restore completes.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    state.supervisor.shutdown_and_join();
+                }
+            }
+        });
 }
 
 /// Render a domain event as a short log line (never any media or personal data).

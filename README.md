@@ -78,6 +78,16 @@ device needs elevated privileges; where the app lacks them the calls fail and it
 degrades to the safe `UnsupportedCamera` behaviour — the controller logs the
 error and leaves the camera alone while still muting the mic.
 
+**A disabled camera never outlives the app.** The webcam is re-enabled on every
+exit path: returning or turning Protection off restores it immediately; quitting
+the app restores it before the process ends (the controller's `shutdown`
+un-does its own changes even when `auto_restore` is off); and an unexpected exit
+— crash, force-kill, power loss — is covered by a small recovery journal. The
+adapter records the device ids it disabled to a file (`camera-recovery.txt` in
+the config dir) and clears it on restore, so the next launch re-enables exactly
+those devices before anything else runs. Only ids the app itself recorded are
+ever restored, so a camera the user disabled stays disabled.
+
 **One microphone port, native on each OS.** On Windows `WindowsMicrophone` mutes
 the default *communications* capture endpoint through the WASAPI Core Audio
 `IAudioEndpointVolume` interface; on Linux `PulseMicrophone` drives the default

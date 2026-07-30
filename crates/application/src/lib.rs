@@ -144,6 +144,20 @@ where
         }
     }
 
+    /// Restore every device the app is currently protecting, unconditionally,
+    /// and end the episode.
+    ///
+    /// Called when the app is shutting down so it never leaves the microphone
+    /// muted or — critically — the camera disabled after it exits. Unlike the
+    /// normal return/​toggle-off restore, this ignores `auto_restore`: a device
+    /// the app switched off must always be switched back on when the app that is
+    /// responsible for it goes away. Safe to call when nothing is being
+    /// protected (a no-op), and idempotent.
+    pub fn shutdown(&mut self) {
+        let now = self.clock.now_ms();
+        self.restore(now, true);
+    }
+
     /// Turn walkaway protection on or off (the user's master switch).
     ///
     /// Reconciles immediately so flipping it takes effect at once: enabling
@@ -223,13 +237,21 @@ where
     }
 
     fn release_protection(&mut self, now: u64) {
+        self.restore(now, false);
+    }
+
+    /// Restore the devices changed during the current protection episode and end
+    /// it. With `force` set (shutdown), restore regardless of `auto_restore`, so
+    /// the app never leaves a device switched off once it stops managing it.
+    fn restore(&mut self, now: u64, force: bool) {
         let Some(protection) = self.protection.take() else {
             return;
         };
 
-        // Only restore when configured to; otherwise leave devices as-is but
-        // still end the episode so a later walkaway can re-engage.
-        if !self.behavior.auto_restore {
+        // Normally restore only when configured to; otherwise leave devices
+        // as-is but still end the episode so a later walkaway can re-engage.
+        // A forced restore (shutdown) always reverts the app's own changes.
+        if !force && !self.behavior.auto_restore {
             return;
         }
 

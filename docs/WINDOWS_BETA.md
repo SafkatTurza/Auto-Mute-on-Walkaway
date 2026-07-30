@@ -114,6 +114,20 @@ Without elevation the app still works and **degrades safely**: the camera is lef
 untouched and the microphone is still muted. Microphone mute (WASAPI) does **not**
 require elevation.
 
+### The camera is never left disabled
+
+Whenever the app disables your webcam, it re-enables it in every exit path:
+
+- **Return / Protection off** — restored immediately.
+- **Quitting the app** (tray *Quit* or closing the window) — restored before the
+  process exits, even if you had *Restore on return* switched off.
+- **Crash, force-kill, or power loss** — the app records the devices it disabled
+  in `camera-recovery.txt` (next to `config.json`) and **re-enables them
+  automatically on the next launch**, before anything else runs.
+
+It only ever re-enables cameras it disabled itself — a webcam you turned off in
+Device Manager before starting the app is left exactly as you set it.
+
 ---
 
 ## 6. Where your data lives
@@ -121,8 +135,13 @@ require elevation.
 | What | Location (Windows) |
 | ---- | ------------------ |
 | Settings | `%APPDATA%\com.automute.walkaway\config.json` |
+| Camera recovery record | `%APPDATA%\com.automute.walkaway\camera-recovery.txt` |
 | App log | `%LOCALAPPDATA%\com.automute.walkaway\logs\amow.log` |
 | Crash log | `%LOCALAPPDATA%\com.automute.walkaway\logs\crash.log` |
+
+The camera-recovery record lists only opaque device ids of cameras the app has
+currently disabled; it exists only while a camera is off and is removed once the
+camera is restored.
 
 The settings file is plain JSON and safe to hand-edit; unknown or missing fields
 fall back to defaults. Logs contain only short status text — never media or

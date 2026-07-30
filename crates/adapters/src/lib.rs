@@ -21,6 +21,7 @@
 mod camera;
 mod clock;
 mod command;
+mod journal;
 mod microphone;
 mod platform;
 mod sysfs;
@@ -30,6 +31,7 @@ mod windows_microphone;
 pub use camera::{LinuxUvcCamera, UnsupportedCamera};
 pub use clock::SystemClock;
 pub use command::{CommandRunner, SystemCommandRunner};
+pub use journal::{CameraJournal, FileCameraJournal, NullCameraJournal};
 pub use microphone::PulseMicrophone;
 pub use platform::{default_camera, default_microphone, PlatformCamera, PlatformMicrophone};
 pub use sysfs::{RealSysfs, Sysfs};

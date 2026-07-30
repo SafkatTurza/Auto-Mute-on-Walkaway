@@ -11,8 +11,9 @@
 //! as a fallback); the enable switch is the user's master on/off. Both push
 //! into the very same channel — the sampling model does not change.
 
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -40,29 +41,67 @@ enum Msg {
     Shutdown,
 }
 
-/// Handle to the running supervisor thread. Dropping it shuts the thread down.
+/// Handle to the running supervisor thread. Dropping it — or calling
+/// [`shutdown_and_join`](Supervisor::shutdown_and_join) — shuts the thread down,
+/// restoring any devices it changed first.
 pub struct Supervisor {
     tx: Sender<Msg>,
-    handle: Option<JoinHandle<()>>,
+    /// Behind a `Mutex<Option<…>>` so shutdown can be triggered through a shared
+    /// `&Supervisor` (from the Tauri exit hook) as well as from `Drop`.
+    handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Supervisor {
     /// Spawn the supervisor thread with an initial configuration.
+    ///
+    /// `camera_recovery_path` is where the camera adapter journals the devices it
+    /// disables, so an unexpected exit can be recovered on the next launch.
     pub fn spawn(
         config: AppConfig,
         bus: EventBus,
         notifier: AppNotifier,
         status: SharedStatus,
         logger: Arc<Logger>,
+        camera_recovery_path: PathBuf,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
         let handle = thread::Builder::new()
             .name("amow-supervisor".into())
-            .spawn(move || run(config, bus, notifier, status, logger, rx))
+            .spawn(move || {
+                run(
+                    config,
+                    bus,
+                    notifier,
+                    status,
+                    logger,
+                    camera_recovery_path,
+                    rx,
+                )
+            })
             .expect("failed to spawn supervisor thread");
         Self {
             tx,
-            handle: Some(handle),
+            handle: Mutex::new(Some(handle)),
+        }
+    }
+
+    /// Stop the supervisor and wait for it to finish restoring devices.
+    ///
+    /// Sends the shutdown message and joins the thread, so any in-flight restore
+    /// (un-mute, re-enable the camera) completes before this returns. Called from
+    /// the Tauri exit hook to guarantee a clean device state even when the
+    /// process would otherwise terminate without running destructors. Idempotent:
+    /// once the thread has been joined, later calls are no-ops, so `Drop` calling
+    /// it again is harmless.
+    pub fn shutdown_and_join(&self) {
+        let _ = self.tx.send(Msg::Shutdown);
+        if let Some(handle) = self
+            .handle
+            .lock()
+            .expect("supervisor handle poisoned")
+            .take()
+        {
+            let _ = handle.join();
         }
     }
 
@@ -96,10 +135,7 @@ impl Supervisor {
 
 impl Drop for Supervisor {
     fn drop(&mut self) {
-        let _ = self.tx.send(Msg::Shutdown);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
+        self.shutdown_and_join();
     }
 }
 
@@ -120,27 +156,34 @@ impl FaceSink {
     }
 }
 
-fn build_controller(config: &AppConfig, bus: EventBus, notifier: AppNotifier) -> Controller {
+fn build_controller(
+    config: &AppConfig,
+    bus: EventBus,
+    notifier: AppNotifier,
+    camera_recovery_path: PathBuf,
+) -> Controller {
     WalkawayController::new(
         config.behavior,
         config.presence,
         SystemClock::new(),
         default_microphone(),
-        default_camera(),
+        default_camera(camera_recovery_path),
         notifier,
         bus,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     mut config: AppConfig,
     bus: EventBus,
     notifier: AppNotifier,
     status: SharedStatus,
     logger: Arc<Logger>,
+    camera_recovery_path: PathBuf,
     rx: Receiver<Msg>,
 ) {
-    let mut controller = build_controller(&config, bus, notifier);
+    let mut controller = build_controller(&config, bus, notifier, camera_recovery_path);
     let mut interval = sample_interval(&config);
 
     // Initial inputs match the controller's initial state: present, protection
@@ -169,11 +212,22 @@ fn run(
                 logger.info("configuration applied");
             }
             Ok(Msg::Shutdown) => {
-                logger.info("supervisor stopping");
+                // Clean-exit contract: restore any device we changed before the
+                // thread ends, so the app never leaves the mic muted or the
+                // camera disabled after it quits.
+                logger.info("supervisor stopping; restoring devices");
+                controller.shutdown();
+                status.update(&controller);
                 break;
             }
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Disconnected) => {
+                // The handle was dropped without a Shutdown message (e.g. the app
+                // is tearing down). Restore devices here too before exiting.
+                logger.info("supervisor channel closed; restoring devices");
+                controller.shutdown();
+                break;
+            }
         }
 
         // Feed the current inputs through the domain each cycle. Both calls are

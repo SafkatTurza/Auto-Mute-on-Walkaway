@@ -17,6 +17,9 @@
 
 #[cfg(target_os = "windows")]
 mod selection {
+    use std::path::PathBuf;
+
+    use crate::journal::FileCameraJournal;
     use crate::windows_camera::{SetupApiCameras, WindowsCamera};
     use crate::windows_microphone::{CoreAudioEndpoint, WindowsMicrophone};
 
@@ -30,9 +33,13 @@ mod selection {
         WindowsMicrophone::system()
     }
 
-    /// Construct the native camera adapter for this platform.
-    pub fn default_camera() -> PlatformCamera {
-        WindowsCamera::new()
+    /// Construct the native camera adapter for this platform, journalling its
+    /// disabled devices to `journal_path` so an unexpected exit can be recovered.
+    pub fn default_camera(journal_path: PathBuf) -> PlatformCamera {
+        WindowsCamera::with_journal(
+            SetupApiCameras::new(),
+            Box::new(FileCameraJournal::new(journal_path)),
+        )
     }
 }
 
@@ -40,7 +47,12 @@ mod selection {
 
 #[cfg(not(target_os = "windows"))]
 mod selection {
+    use std::path::PathBuf;
+
+    use crate::camera::UVC_DRIVER_DIR;
     use crate::command::SystemCommandRunner;
+    use crate::journal::FileCameraJournal;
+    use crate::sysfs::RealSysfs;
     use crate::{LinuxUvcCamera, PulseMicrophone};
 
     /// Native microphone adapter for this platform.
@@ -53,9 +65,14 @@ mod selection {
         PulseMicrophone::system()
     }
 
-    /// Construct the native camera adapter for this platform.
-    pub fn default_camera() -> PlatformCamera {
-        LinuxUvcCamera::new()
+    /// Construct the native camera adapter for this platform, journalling its
+    /// unbound interfaces to `journal_path` so an unexpected exit can be recovered.
+    pub fn default_camera(journal_path: PathBuf) -> PlatformCamera {
+        LinuxUvcCamera::with_journal(
+            RealSysfs,
+            UVC_DRIVER_DIR,
+            Box::new(FileCameraJournal::new(journal_path)),
+        )
     }
 }
 
@@ -78,7 +95,8 @@ mod tests {
         // Result either way; the contract is "never panic".
         let _ = mic.is_muted();
 
-        let camera = default_camera();
+        let journal_path = std::env::temp_dir().join("amow-platform-test-camera-recovery.txt");
+        let camera = default_camera(journal_path);
         let _ = camera.is_enabled();
     }
 
