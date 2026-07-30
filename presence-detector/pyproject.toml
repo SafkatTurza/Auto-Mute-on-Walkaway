@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amow-presence"
+version = "0.1.0"
+description = "Privacy-first webcam presence detector for Auto-Mute on Walkaway."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# The pure-logic core (state machine, event bus, config) needs no third-party
+# packages. The live camera adapter pulls these in; installing the base package
+# alone keeps the tested logic dependency-free.
+dependencies = []
+
+[project.optional-dependencies]
+# Required only to run the live detector against a real webcam.
+camera = ["opencv-python>=4.8", "mediapipe>=0.10"]
+dev = ["pytest>=7", "ruff>=0.1", "mypy>=1.5"]
+
+[project.scripts]
+amow-presence = "amow_presence.__main__:main"
+
+[tool.setuptools]
+packages = ["amow_presence"]
+
+[tool.pytest.ini_options]
+# Flat layout: make the package importable when running from this directory.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_ignores = false
+
+# OpenCV and MediaPipe ship no type stubs and are optional at runtime.
+[[tool.mypy.overrides]]
+module = ["cv2", "cv2.*", "mediapipe", "mediapipe.*"]
+ignore_missing_imports = true

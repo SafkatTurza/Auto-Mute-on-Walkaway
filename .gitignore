@@ -11,6 +11,15 @@ dist
 src-tauri/target
 src-tauri/gen
 
+# Python (presence detector)
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+
 # App runtime artifacts (config & logs are written to the OS data dir,
 # never committed)
 *.log

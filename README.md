@@ -29,7 +29,8 @@ is completed to production quality — with tests — before the next is started
 | Settings UI   | UI             | ✅ Done (React) |
 | Tauri wiring  | UI / OS        | ✅ Done      |
 | Camera        | Infrastructure | ⚠️ Platform-limited (see below) |
-| Presence capture (MediaPipe) | Infrastructure | ⏳ Next |
+| Presence capture (MediaPipe) | Infrastructure | ✅ Done (Python sidecar, see `presence-detector/`) |
+| Host bridge (sidecar → Event Bus) | Application | ⏳ Next |
 | Meeting detection | Infrastructure | ⏳ Next  |
 
 The **entire walkaway decision logic — presence debouncing, meeting gating,
@@ -39,12 +40,17 @@ owns the controller, the microphone is really muted through `pactl`, actions
 raise desktop notifications, a tray gives show/quit, and a React Settings panel
 edits the persisted config live.
 
-**What still feeds the logic manually.** The presence detector (webcam +
-MediaPipe) and the meeting detector are the remaining modules. Until they land,
-the Settings window exposes two manual inputs — *"In a meeting"* and *"Away"* —
-that drive the **real** protection path (they mute your actual mic). Those
-detectors will push into the exact same sampling channel, so no application code
-changes when they arrive.
+**Presence detection is implemented as a local sidecar.** The webcam +
+MediaPipe presence detector lives in [`presence-detector/`](presence-detector/)
+as a self-contained Python module (OpenCV + MediaPipe have no production-grade
+Rust binding). It watches the camera on-device and emits `present` / `leaving` /
+`away` / `returning` events as newline-delimited JSON on stdout — the Event Bus
+contract. It holds no business logic and controls no devices; it only reports
+presence. The remaining wiring is the **host bridge**: the Tauri supervisor
+spawning that sidecar and translating its event lines onto the in-process
+`EventBus`. Until that bridge and the meeting detector land, the Settings window
+exposes two manual inputs — *"In a meeting"* and *"Away"* — that drive the
+**real** protection path (they mute your actual mic).
 
 **Camera is platform-limited by design, not stubbed.** Unlike audio, Linux has
 no portable way to force another app's camera off — the capture device is owned
@@ -78,7 +84,14 @@ crates/
                  (SystemClock, PulseMicrophone, UnsupportedCamera)
 src-tauri/       UI/OS: the Tauri app that composes the above and hosts the UI
 src/             UI: the React + TypeScript Settings front end
+presence-detector/  Infrastructure: Python webcam presence sidecar
+                    (OpenCV + MediaPipe) emitting presence events as JSON
 ```
+
+The presence sidecar is a separate process in Python because OpenCV/MediaPipe
+have no production-grade Rust binding. It communicates over a narrow,
+language-neutral contract (JSON lines on stdout), so it stays fully decoupled
+from the Rust core — see [`presence-detector/README.md`](presence-detector/README.md).
 
 `src-tauri/` is deliberately **excluded from the Cargo workspace** so
 `cargo test` on the logic crates never needs the GUI toolchain (webkit2gtk).
