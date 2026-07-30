@@ -54,8 +54,16 @@ class MediaPipeFaceSource:
         self._detector: object | None = None
 
     def open(self) -> None:
-        """Acquire the camera and detector. Idempotent."""
-        if self._capture is not None:
+        """Acquire the camera and detector. Idempotent and atomic.
+
+        Both handles are assigned to ``self`` only once both are built, so a
+        failure part-way through never leaves a half-open source (a camera with
+        no detector). That matters because a partially-open source would make
+        every later tick fail: the re-open guard would see the camera already
+        set and skip re-initialising the detector. A camera opened here but
+        orphaned by a detector failure is released before raising.
+        """
+        if self._capture is not None and self._detector is not None:
             return
         try:
             import cv2
@@ -67,12 +75,24 @@ class MediaPipeFaceSource:
 
         capture = cv2.VideoCapture(self._camera_index)
         if not capture.isOpened():
+            capture.release()
             raise FaceSourceError(f"could not open camera index {self._camera_index}")
+
+        try:
+            detector = mp.solutions.face_detection.FaceDetection(
+                model_selection=self._model_selection,
+                min_detection_confidence=self._min_detection_confidence,
+            )
+        except Exception as exc:  # pragma: no cover - depends on host packages
+            # An incompatible or broken MediaPipe build (a frequent problem on
+            # unsupported Python versions) fails here. Release the camera we just
+            # opened and surface it as a capture error the runner skips, rather
+            # than leaking the device and crash-looping on the next tick.
+            capture.release()
+            raise FaceSourceError(f"could not initialise the face detector: {exc}") from exc
+
         self._capture = capture
-        self._detector = mp.solutions.face_detection.FaceDetection(
-            model_selection=self._model_selection,
-            min_detection_confidence=self._min_detection_confidence,
-        )
+        self._detector = detector
         logger.info("camera %d opened; MediaPipe face detection ready", self._camera_index)
 
     def is_face_present(self) -> bool:
@@ -85,7 +105,10 @@ class MediaPipeFaceSource:
             self.open()
         import cv2  # local: already proven importable by open()
 
-        assert self._capture is not None and self._detector is not None
+        # A successful open() guarantees both handles; if we still lack them,
+        # treat it as a capture failure the runner can skip rather than crashing.
+        if self._capture is None or self._detector is None:
+            raise FaceSourceError("camera/detector not initialised")
         ok, frame = self._capture.read()  # type: ignore[attr-defined]
         if not ok or frame is None:
             raise FaceSourceError("failed to read a frame from the camera")
